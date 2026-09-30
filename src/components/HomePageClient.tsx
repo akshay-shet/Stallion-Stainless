@@ -844,7 +844,6 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
               {/* Horizontal Right Scrollable Strip */}
               <div
                 ref={proScrollRef}
-                data-lenis-prevent
                 className={`flex overflow-x-auto ${isAndroidView ? "gap-2" : "gap-4 sm:gap-6"} pb-3 pt-1 px-0.5 scroll-smooth snap-x snap-mandatory no-scrollbar w-full`}
               >
                 {proProducts.map((product) => (
@@ -995,7 +994,6 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
               {/* Horizontal Right Scrollable Strip */}
               <div
                 ref={bestSellingScrollRef}
-                data-lenis-prevent
                 className={`flex overflow-x-auto ${isAndroidView ? "gap-2" : "gap-4 sm:gap-6"} pb-3 pt-1 px-0.5 scroll-smooth snap-x snap-mandatory no-scrollbar w-full`}
               >
                 {bestSellingProducts.map((product) => (
@@ -1233,7 +1231,6 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
             {/* Loop Scroll Container (3 in a row on mobile: w-1/3 per item) */}
             <div
               ref={galleryScrollRef}
-              data-lenis-prevent
               onScroll={handleGalleryScroll}
               className="flex overflow-x-auto no-scrollbar w-full select-none touch-pan-x"
               style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
