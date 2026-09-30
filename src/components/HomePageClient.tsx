@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import ParticleDrift from "@/components/originkit/ui/particle-drift";
 import { useLenis } from "@/components/SmoothScroll";
+import BespokeHoloCard from "@/components/BespokeHoloCard";
+import ArchitecturalEmbers from "@/components/ArchitecturalEmbers";
 
 interface HomePageClientProps {
   isAndroid?: boolean;
@@ -681,8 +683,11 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
         {/* =========================================================================
             SECTION 2: "WHAT WE OFFER" - 3D FLIP CATEGORY CARDS (bg-[#c4c4be])
             ========================================================================= */}
-        <section className={`w-full bg-[#c4c4be] ${isAndroidView ? "py-6 sm:py-20 px-2.5 sm:px-6" : "py-16 sm:py-20 px-4 sm:px-6"} lg:px-12 border-b border-[#b0b0a8] relative`}>
-          <div className="max-w-[1600px] mx-auto">
+        <section className={`w-full bg-[#c4c4be] ${isAndroidView ? "py-6 sm:py-20 px-2.5 sm:px-6" : "py-16 sm:py-20 px-4 sm:px-6"} lg:px-12 border-b border-[#b0b0a8] relative overflow-hidden`}>
+          {/* Cindermane Atmospheric Golden Embers */}
+          <ArchitecturalEmbers />
+
+          <div className="max-w-[1600px] mx-auto relative z-10">
             {/* Section Header (Center-aligned) */}
             <div className={`text-center max-w-2xl mx-auto ${isAndroidView ? "mb-4 sm:mb-16" : "mb-12 sm:mb-16"}`}>
               <h2 className={`font-display ${isAndroidView ? "text-xl sm:text-3xl lg:text-4xl" : "text-2xl sm:text-3xl lg:text-4xl"} font-bold text-[#2d394b] tracking-tight uppercase text-center`}>
@@ -695,136 +700,17 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
               </p>
             </div>
 
-            {/* 6 Dual-Sided 3D Flip Cards Grid - 2 in a row on Android view */}
+            {/* 6 Dual-Sided 3D Holo Cards Grid - 2 in a row on Android view */}
             <div className={`grid ${isAndroidView ? "grid-cols-2 gap-2 sm:gap-8" : "grid-cols-1 sm:grid-cols-2"} lg:grid-cols-3 gap-6 sm:gap-8`}>
-              {offerCards.map((card) => {
-                const isFlipped = flippedCardId === card.id;
-
-                return (
-                  <div
-                    key={card.id}
-                    onClick={() => toggleCardFlip(card.id)}
-                    className={`group perspective-1000 ${isAndroidView ? "h-[200px] sm:h-[420px]" : "h-[380px] sm:h-[420px]"} w-full cursor-pointer select-none`}
-                  >
-                    {/* Inner 3D Container */}
-                    <div
-                      className={`relative w-full h-full transition-transform duration-700 transform-style-3d rounded-2xl shadow-sm hover:shadow-xl ${
-                        isFlipped ? "rotate-y-180" : "group-hover:rotate-y-180"
-                      }`}
-                    >
-                      {/* FRONT FACE */}
-                      <div className="absolute inset-0 w-full h-full backface-hidden rounded-2xl bg-white border border-stone-200/90 overflow-hidden flex flex-col justify-between">
-                        {/* Photo Container */}
-                        <div className={`relative w-full ${isAndroidView ? "h-[76%] sm:h-[80%]" : "h-[80%]"} overflow-hidden bg-stone-100`}>
-                          <Image
-                            src={card.image}
-                            alt={card.title}
-                            fill
-                            className="object-cover transition-transform duration-700 group-hover:scale-105"
-                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 50vw, 33vw"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-40 pointer-events-none" />
-
-                          {/* Top Badges - Fully visible on desktop, no truncation */}
-                          <div className="absolute top-2 left-2 sm:top-3.5 sm:left-3.5 z-10 flex items-center">
-                            <span className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full bg-white/95 backdrop-blur-md font-mono font-semibold text-[7.5px] sm:text-[11px] uppercase tracking-wider text-charcoal-ink border border-stone-200/80 shadow-xs whitespace-nowrap">
-                              {card.badge}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Front Card Info - Compact, decent, and well-balanced */}
-                        <div className="py-1 px-1.5 sm:py-3 sm:px-4 flex-1 flex flex-col justify-center bg-white relative">
-                          <div className="text-center">
-                            <h3 className="font-display text-[9.5px] sm:text-base lg:text-lg font-bold text-charcoal-ink uppercase tracking-wider text-center line-clamp-1">
-                              {card.title}
-                            </h3>
-                            {card.subtitle && !isAndroidView && (
-                              <p className="hidden sm:block font-sans text-[11px] text-stone-500 tracking-wide mt-0.5 line-clamp-1 text-center font-normal">
-                                {card.subtitle}
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Android View Only: Tap to flip on mobile (<640px) */}
-                          {isAndroidView && (
-                            <div className="flex sm:hidden items-center justify-center pt-0.5 mt-0.5 border-t border-stone-100 text-[6.5px] font-sans text-stone-400">
-                              <span className="italic">Tap to flip</span>
-                            </div>
-                          )}
-
-                          {/* Bottom Active Metallic Line */}
-                          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-[#5e606c] via-[#C59B27] to-[#5e606c]" />
-                        </div>
-                      </div>
-
-                      {/* BACK FACE (Flipped) */}
-                      <div className="absolute inset-0 w-full h-full backface-hidden rotate-y-180 rounded-2xl bg-[#5e606c] text-white p-2 sm:p-5 lg:p-6 flex flex-col justify-between border border-[#454a4f] shadow-xl overflow-hidden">
-                        {/* Background metallic shimmer */}
-                        <div className="absolute -right-10 -bottom-10 w-44 h-44 rounded-full bg-white/5 pointer-events-none blur-2xl" />
-
-                        <div className="overflow-hidden flex flex-col justify-between h-full">
-                          <div>
-                            {/* Header: Title + Specs badge */}
-                            <div className="flex items-center justify-between mb-0.5 pb-0.5 sm:mb-2 sm:pb-1.5 border-b border-white/15">
-                              <div className="flex-1 text-left sm:text-center pr-1 sm:pr-0">
-                                <h3 className="font-display text-[9.5px] sm:text-base lg:text-lg font-bold text-white uppercase tracking-tight sm:tracking-wider truncate">
-                                  {card.title}
-                                </h3>
-                              </div>
-                              <span className="px-1 py-0.5 sm:px-2.5 sm:py-1 text-[6px] sm:text-[10px] rounded bg-white/15 font-mono uppercase tracking-widest text-[#E5C378] sm:text-white/90 shrink-0 font-semibold ml-1">
-                                {isAndroidView ? card.badge : "Specs"}
-                              </span>
-                            </div>
-
-                            {/* Description (Visible on both mobile & desktop) */}
-                            <p className={`${isAndroidView ? "text-[6.8px] line-clamp-2 mb-1 text-stone-200/95" : "hidden sm:block text-xs text-stone-200/90 mb-2.5"} font-sans leading-tight text-left`}>
-                              {card.description}
-                            </p>
-
-                            {/* Mobile Bullet Points (< 640px): 3 concise specification points */}
-                            <div className="space-y-0.5 sm:hidden my-0.5">
-                              {card.bullets.slice(0, 3).map((bullet, idx) => (
-                                <div key={idx} className="flex items-center gap-1 text-[6.8px] leading-tight font-sans text-stone-100">
-                                  <CheckCircle2 className="w-2 h-2 text-[#C59B27] shrink-0" />
-                                  <span className="truncate">{bullet}</span>
-                                </div>
-                              ))}
-                              {card.bullets.length > 3 && (
-                                <div className="text-[6px] font-mono text-[#E5C378] pl-3 pt-0.5">
-                                  +{card.bullets.length - 3} more architectural specs
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Desktop & Tablet Bullet Points (>= 640px): ALL 8 points completely filling the desktop card */}
-                            <div className="hidden sm:block space-y-1 sm:space-y-1.5 mb-2.5">
-                              {card.bullets.map((bullet, idx) => (
-                                <div key={idx} className="flex items-center gap-2 text-xs lg:text-[12px] font-sans text-stone-100">
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-[#C59B27] shrink-0" />
-                                  <span className="truncate">{bullet}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* CTA Link to collection */}
-                          <div className="pt-1 sm:pt-2.5 border-t border-white/15">
-                            <Link
-                              href={card.href}
-                              onClick={(e) => e.stopPropagation()}
-                              className="w-full py-1 text-[8px] sm:py-2.5 sm:text-xs rounded-lg bg-white hover:bg-[#f6f5f1] text-[#393f44] font-sans font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all duration-300 shadow-sm active:scale-98"
-                            >
-                              <span>Explore Collection</span>
-                              <ArrowUpRight className="w-3 h-3 sm:w-4 sm:h-4 text-[#C59B27]" />
-                            </Link>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {offerCards.map((card) => (
+                <BespokeHoloCard
+                  key={card.id}
+                  card={card}
+                  isAndroidView={isAndroidView}
+                  isFlipped={flippedCardId === card.id}
+                  onToggleFlip={(id) => toggleCardFlip(id)}
+                />
+              ))}
             </div>
           </div>
         </section>
