@@ -358,7 +358,7 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
         ══════════════════════════════════════════════════════════════════════ */}
         <section
           className={`relative w-full ${
-            isAndroidView ? "h-auto aspect-video" : "h-screen min-h-[600px]"
+            isAndroidView ? "h-auto aspect-video" : "h-[calc(100vh-88px)] min-h-[540px]"
           } bg-stone-950 flex items-center justify-center overflow-hidden`}
         >
           {/* Video layer */}
