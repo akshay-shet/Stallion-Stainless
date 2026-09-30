@@ -252,3 +252,9 @@ html.android-device .stallion-intro-container,
 .rotate-y-180 {
   transform: rotateY(180deg);
 }
+
+/* Marquee ticker for manifesto strip */
+@keyframes marqueeScroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
