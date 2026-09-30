@@ -381,48 +381,74 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
             )}
           </div>
 
-          {/* Cinematic vignette + gradient overlay — Kage-style atmospheric layering */}
+          {/* Cinematic overlays — no text, pure architectural UI decoration */}
           {!isAndroidView && (
             <>
-              {/* Dark bottom scrim for text legibility */}
-              <div className="absolute inset-0 z-20 bg-gradient-to-t from-[#111111]/70 via-transparent to-[#111111]/20 pointer-events-none" />
-              {/* Subtle left column separator line (Kage editorial detail) */}
-              <div className="absolute left-12 top-0 bottom-0 w-px bg-white/10 z-30 pointer-events-none hidden lg:block" />
-              <div className="absolute right-12 top-0 bottom-0 w-px bg-white/10 z-30 pointer-events-none hidden lg:block" />
+              {/* Radial vignette — dark edges, clear centre */}
+              <div
+                className="absolute inset-0 z-20 pointer-events-none"
+                style={{
+                  background:
+                    "radial-gradient(ellipse 80% 80% at 50% 50%, transparent 40%, rgba(17,17,17,0.55) 100%)",
+                }}
+              />
 
-              {/* Hero editorial text — bottom-left anchored (Kage layout) */}
-              <div className="absolute bottom-0 left-0 right-0 z-30 px-8 sm:px-14 lg:px-20 pb-12 sm:pb-16">
-                <div className="max-w-[1600px] mx-auto flex flex-col sm:flex-row items-end justify-between gap-6">
-                  {/* Left: brand statement */}
-                  <div className="flex flex-col gap-3 max-w-2xl">
-                    {/* Eyebrow label */}
-                    <span className="font-mono text-[10px] sm:text-xs tracking-[0.25em] uppercase text-[#C59B27] flex items-center gap-2">
-                      <span className="inline-block w-8 h-px bg-[#C59B27]" />
-                      Stallion Stainless
-                    </span>
-                    <h1 className="font-display text-4xl sm:text-5xl lg:text-7xl font-bold text-white leading-[1.02] tracking-tight">
-                      Architecture<br />
-                      <span className="text-[#C59B27]">Forged</span> in Steel
-                    </h1>
-                    <p className="font-sans text-sm sm:text-base text-white/70 max-w-md leading-relaxed hidden sm:block">
-                      Surgical-grade 304 stainless, vacuum PVD finishes, and bespoke Italian upholstery — crafted for spaces that demand permanence.
-                    </p>
-                  </div>
+              {/* Top-left corner bracket */}
+              <div className="absolute top-8 left-8 z-30 pointer-events-none hidden lg:block">
+                <div className="w-10 h-10 border-t-2 border-l-2 border-[#C59B27]/70" />
+              </div>
+              {/* Top-right corner bracket */}
+              <div className="absolute top-8 right-8 z-30 pointer-events-none hidden lg:block">
+                <div className="w-10 h-10 border-t-2 border-r-2 border-[#C59B27]/70" />
+              </div>
+              {/* Bottom-left corner bracket */}
+              <div className="absolute bottom-8 left-8 z-30 pointer-events-none hidden lg:block">
+                <div className="w-10 h-10 border-b-2 border-l-2 border-[#C59B27]/70" />
+              </div>
+              {/* Bottom-right corner bracket */}
+              <div className="absolute bottom-8 right-8 z-30 pointer-events-none hidden lg:block">
+                <div className="w-10 h-10 border-b-2 border-r-2 border-[#C59B27]/70" />
+              </div>
 
-                  {/* Right: CTA */}
-                  <div className="flex flex-col items-end gap-3 shrink-0">
-                    <Link
-                      href="/collections"
-                      className="group inline-flex items-center gap-2 px-6 py-3 bg-[#C59B27] text-[#111111] font-display font-bold text-xs uppercase tracking-widest hover:bg-white transition-colors duration-300 rounded-none"
-                    >
-                      Explore Collections
-                      <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-                    </Link>
-                    <span className="font-mono text-[9px] uppercase tracking-widest text-white/40">
-                      Scroll to discover ↓
-                    </span>
+              {/* Centred crosshair reticle */}
+              <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none hidden lg:flex">
+                <div className="relative w-16 h-16">
+                  {/* Horizontal arm */}
+                  <div className="absolute top-1/2 left-0 right-0 h-px bg-white/20 -translate-y-1/2" />
+                  {/* Vertical arm */}
+                  <div className="absolute left-1/2 top-0 bottom-0 w-px bg-white/20 -translate-x-1/2" />
+                  {/* Centre dot — pulsing gold */}
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="w-2 h-2 rounded-full bg-[#C59B27] animate-ping opacity-70" />
+                    <div className="absolute w-1.5 h-1.5 rounded-full bg-[#C59B27]" />
                   </div>
                 </div>
+              </div>
+
+              {/* Bottom gold rule — full width accent line */}
+              <div className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
+                <div className="h-[3px] bg-gradient-to-r from-transparent via-[#C59B27] to-transparent opacity-80" />
+              </div>
+
+              {/* Left edge vertical tick marks — architectural detail */}
+              <div className="absolute left-8 top-1/2 -translate-y-1/2 z-30 pointer-events-none hidden lg:flex flex-col gap-2">
+                {[...Array(5)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="bg-white/30"
+                    style={{ width: i === 2 ? "20px" : "10px", height: "1px" }}
+                  />
+                ))}
+              </div>
+              {/* Right edge vertical tick marks */}
+              <div className="absolute right-8 top-1/2 -translate-y-1/2 z-30 pointer-events-none hidden lg:flex flex-col gap-2 items-end">
+                {[...Array(5)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="bg-white/30"
+                    style={{ width: i === 2 ? "20px" : "10px", height: "1px" }}
+                  />
+                ))}
               </div>
             </>
           )}
