@@ -159,7 +159,7 @@ export default function ReviewsPage() {
     <div className="flex flex-col min-h-screen bg-surface">
       <Header />
 
-      <main className="flex-grow max-w-container-max mx-auto px-12 md:px-20 py-16 w-full">
+      <main className="flex-grow max-w-container-max mx-auto px-12 md:px-20 py-16 w-full pt-[72px] sm:pt-[88px]">
         {/* Header Summary */}
         <div className="text-center max-w-2xl mx-auto mb-16">
           <span className="text-[10px] font-display tracking-widest text-stone-500 uppercase font-semibold">

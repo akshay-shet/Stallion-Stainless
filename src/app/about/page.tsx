@@ -20,7 +20,7 @@ export default function AboutPage() {
     <div className="min-h-screen flex flex-col bg-[#FDFCFB] text-charcoal-ink">
       <Header />
 
-      <main className="flex-1 w-full pb-24">
+      <main className="flex-1 pt-[72px] sm:pt-[88px] w-full pb-24">
         {/* Top Breadcrumb Bar */}
         <div className="border-b border-outline-variant/60 bg-white">
           <div className="max-w-7xl mx-auto px-6 md:px-12 lg:px-20 py-3.5 flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-stone-500">

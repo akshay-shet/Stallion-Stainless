@@ -82,7 +82,7 @@ export default function ProCollectionPage() {
 
         {/* Right Content Area */}
         <div className="flex-1 flex flex-col min-w-0">
-          <main className="flex-grow px-2 sm:px-6 md:pl-12 md:pr-20 py-3 sm:py-12 min-w-0 w-full max-w-container-max mx-auto">
+          <main className="flex-grow px-2 sm:px-6 md:pl-12 md:pr-20 py-3 sm:py-12 min-w-0 w-full max-w-container-max mx-auto pt-[72px] sm:pt-[88px]">
           {/* Breadcrumbs, Menu Toggle & Search Bar in One Line on Mobile */}
           <div className="flex items-center gap-1.5 sm:gap-4 mb-3 sm:mb-8 w-full">
             {/* Menu Toggle for Mobile Filter Drawer */}

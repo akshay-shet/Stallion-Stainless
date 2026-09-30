@@ -259,7 +259,7 @@ Please review this living room configuration inquiry and revert with custom quot
     <div className="flex flex-col min-h-screen bg-warm-ivory text-on-surface">
       <Header />
 
-      <main className="flex-grow w-full max-w-container-max mx-auto px-6 sm:px-12 md:px-20 py-10 md:py-14">
+      <main className="flex-grow w-full max-w-container-max mx-auto px-6 sm:px-12 md:px-20 py-10 md:py-14 pt-[72px] sm:pt-[88px]">
         <div className="max-w-3xl mx-auto text-center mb-10">
           <span className="text-[11px] font-sans uppercase tracking-widest text-stone-500 font-bold">
             Review Your Living Space

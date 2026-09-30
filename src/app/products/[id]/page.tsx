@@ -41,7 +41,7 @@ export default function ProductDetailPage() {
     return (
       <div className="flex flex-col min-h-screen bg-warm-ivory text-on-surface">
         <Header />
-        <main className="flex-grow flex flex-col items-center justify-center py-24 px-6">
+        <main className="flex-grow flex flex-col items-center justify-center py-24 px-6 pt-[72px] sm:pt-[88px]">
           <h1 className="font-display text-2xl font-bold mb-4">Product Not Found</h1>
           <p className="font-sans text-on-surface-variant mb-6">The requested sofa collection does not exist.</p>
           <Link href="/collections" className="bg-charcoal-ink text-white font-sans text-label-caps py-3 px-6 rounded-sm uppercase tracking-wider text-xs">
