@@ -24,6 +24,7 @@ import ParticleDrift from "@/components/originkit/ui/particle-drift";
 import { useLenis } from "@/components/SmoothScroll";
 import BespokeHoloCard from "@/components/BespokeHoloCard";
 import ArchitecturalEmbers from "@/components/ArchitecturalEmbers";
+import KageArchitecturalSanctuary from "@/components/KageArchitecturalSanctuary";
 
 interface HomePageClientProps {
   isAndroid?: boolean;
@@ -1162,6 +1163,11 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
             </div>
           </section>
         )}
+
+        {/* =========================================================================
+            SECTION 4.5: ARCHITECTURAL SANCTUARY — KAGE TEMPLE THREE.JS IMMERSIVE
+            ========================================================================= */}
+        <KageArchitecturalSanctuary isAndroidView={isAndroidView} />
 
         {/* =========================================================================
             SECTION 5: FULL-BLEED LIVING GALLERY / SHOWCASE STRIP
