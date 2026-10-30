@@ -21,11 +21,6 @@ import {
 import { useLenis } from "@/components/SmoothScroll";
 import BespokeHoloCard from "@/components/BespokeHoloCard";
 import ArchitecturalEmbers from "@/components/ArchitecturalEmbers";
-import ScrollVideoHero from "@/components/ScrollVideoHero";
-
-// ── Update this after running scripts/extract-frames.bat ──────────────────────
-// Set to the total number of frames in public/frames/
-const FRAME_COUNT = 150; // placeholder — update after extraction
 
 interface HomePageClientProps {
   isAndroid?: boolean;

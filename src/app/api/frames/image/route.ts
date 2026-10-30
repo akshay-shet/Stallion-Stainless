@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
 
   // Prevent directory traversal
   const cleanName = path.basename(file);
-  const filePath = path.join("D:\\Stallion Project\\Items\\Home page Video_frames", cleanName);
+  const filePath = path.join(process.cwd(), "public", "frames", cleanName);
 
   if (!fs.existsSync(filePath)) {
     return new NextResponse("Not found", { status: 404 });

@@ -6,17 +6,15 @@ export async function GET() {
   try {
     const candidates = [
       path.join(process.cwd(), "public", "about-frames"),
-      "D:\\Stallion Project\\Items\\Video Project 10_frames",
-      "D:/Stallion Project/Items/Video Project 10_frames",
     ];
 
     let foundDir: string | null = null;
     let files: string[] = [];
 
     for (const dir of candidates) {
-      if (fs.existsSync(dir)) {
+      if (fs.existsSync(/*turbopackIgnore: true*/ dir)) {
         const list = fs
-          .readdirSync(dir)
+          .readdirSync(/*turbopackIgnore: true*/ dir)
           .filter((file) => /\.(jpg|jpeg|png|webp)$/i.test(file));
         if (list.length > 0) {
           foundDir = dir;
