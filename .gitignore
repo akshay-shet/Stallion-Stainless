@@ -49,5 +49,3 @@ next-env.d.ts
 
 # extracted temp frames
 public/about-frames/
-
-public/categories/

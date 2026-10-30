@@ -1009,8 +1009,30 @@ export default function ProductDetailPage() {
             }
           },
           (err) => {
-            console.error("Error loading GLTF model:", err);
-            if (isMounted) setIsModelLoading(false);
+            console.warn("Primary 3D model not found, falling back to category model:", modelUrl);
+            const fallbackModel = isTable
+              ? "/categories/Dining Tables/DT-01/DT-01.glb"
+              : "/categories/Sofa Sets/ATLAS/ATLAS/3.glb";
+
+            if (modelUrl !== fallbackModel) {
+              loader.load(
+                fallbackModel,
+                (gltf) => {
+                  if (!isMounted) return;
+                  setupMeshMaterials(gltf.scene, isTable, metalMaterial, fabricMaterial, marbleMaterial);
+                  frameModelInScene(gltf.scene);
+                  scene.add(gltf.scene);
+                  applySteelFinish(selectedSteel);
+                  setIsModelLoading(false);
+                },
+                undefined,
+                () => {
+                  if (isMounted) setIsModelLoading(false);
+                }
+              );
+            } else {
+              if (isMounted) setIsModelLoading(false);
+            }
           }
         );
       }
