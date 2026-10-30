@@ -67,8 +67,8 @@ export default function Sidebar({
   const categories = [
     { id: "all", name: "All Products" },
     { id: "sofa", name: "Sofa" },
-    { id: "accent-recliner", name: "Accent & Recliner" },
-    { id: "coffee-corner-table", name: "Coffee & Corner Table" },
+    { id: "corner-table", name: "Corner Tables" },
+    { id: "teapoy", name: "Teapoy" },
     { id: "dining-table", name: "Dining Table" },
     { id: "partition-console", name: "Partition & Console" },
     { id: "chairs", name: "Chairs" },

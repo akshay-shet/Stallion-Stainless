@@ -63,17 +63,29 @@ function LenisScrollHandler() {
 }
 
 export function SmoothScroll({ children }: { children: React.ReactNode }) {
+  const [isTouchDevice, setIsTouchDevice] = React.useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const isTouch =
+        "ontouchstart" in window ||
+        navigator.maxTouchPoints > 0 ||
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent);
+      setIsTouchDevice(isTouch);
+    }
+  }, []);
+
   return (
     <ReactLenis
       root
       options={{
-        duration: 1.2,
+        duration: 1.1,
         easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
         orientation: "vertical",
         gestureOrientation: "vertical",
-        smoothWheel: true,
+        smoothWheel: !isTouchDevice,
         wheelMultiplier: 1,
-        touchMultiplier: 1.5,
+        touchMultiplier: 0, // Never hijack native touch scrolling on Android / Mobile
         infinite: false,
         syncTouch: false,
         autoResize: true,

@@ -273,8 +273,8 @@ Please review this custom fabrication request and revert with a design feasibili
 
   const itemCategories = [
     "Sofa",
-    "Accent & Recliner",
-    "Coffee & Corner Table",
+    "Corner Tables",
+    "Teapoy",
     "Dining Table",
     "Partition & Console",
     "Chairs",
@@ -332,11 +332,11 @@ Please review this custom fabrication request and revert with a design feasibili
                 
                 {(() => {
                   const isCategoryMatch = (pCat: string, typeName: string) => {
-                    if (typeName === "Coffee & Corner Table" || typeName === "Coffee Table" || typeName === "Corner Table") {
-                      return pCat === "coffee-corner-table" || pCat === "coffee-table" || pCat === "corner-table" || (pCat as string) === "table";
+                    if (typeName === "Corner Tables" || typeName === "Corner Table") {
+                      return pCat === "corner-table" || (pCat as string) === "Corner tables";
                     }
-                    if (typeName === "Accent & Recliner" || typeName === "Accent" || typeName === "Recliner") {
-                      return pCat === "accent-recliner" || pCat === "accent" || pCat === "recliner";
+                    if (typeName === "Teapoy" || typeName === "Coffee Table" || typeName === "Coffee & Corner Table") {
+                      return pCat === "teapoy" || pCat === "coffee-table" || pCat === "coffee-corner-table";
                     }
                     if (typeName === "Partition & Console" || typeName === "Partition" || typeName === "Console") {
                       return pCat === "partition-console" || pCat === "partition" || pCat === "console";

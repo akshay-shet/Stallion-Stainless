@@ -30,11 +30,157 @@ const gltfTextureCache = new Map<
   { map?: THREE.Texture; normalMap?: THREE.Texture; roughnessMap?: THREE.Texture }
 >();
 
+// Procedural Triplanar UV Generator for GLTF BufferGeometries missing UV coordinates
+function generateTriplanarUVs(geometry: THREE.BufferGeometry, scale = 3.5) {
+  if (geometry.attributes.uv && geometry.attributes.uv.count > 0) return;
+  const pos = geometry.attributes.position;
+  if (!pos || pos.count === 0) return;
+
+  if (!geometry.attributes.normal) {
+    geometry.computeVertexNormals();
+  }
+  const norm = geometry.attributes.normal;
+  const count = pos.count;
+  const uvs = new Float32Array(count * 2);
+
+  for (let i = 0; i < count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const nx = norm ? Math.abs(norm.getX(i)) : 0;
+    const ny = norm ? Math.abs(norm.getY(i)) : 1;
+    const nz = norm ? Math.abs(norm.getZ(i)) : 0;
+
+    let u = 0;
+    let v = 0;
+    if (ny >= nx && ny >= nz) {
+      // Top & bottom horizontal surfaces (seat cushions, armrest tops)
+      u = x * scale;
+      v = z * scale;
+    } else if (nx >= nz) {
+      // Lateral panels & side arms
+      u = z * scale;
+      v = y * scale;
+    } else {
+      // Front & rear backrests
+      u = x * scale;
+      v = y * scale;
+    }
+    uvs[i * 2] = u;
+    uvs[i * 2 + 1] = v;
+  }
+
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geometry.attributes.uv.needsUpdate = true;
+}
+
+// Procedural Tactile Micro-Weave Normal Map Generator
+let cachedWeaveNormalMap: THREE.CanvasTexture | null = null;
+function getFabricMicroWeaveNormalMap(): THREE.CanvasTexture {
+  if (cachedWeaveNormalMap) return cachedWeaveNormalMap;
+  if (typeof document === "undefined") {
+    return new THREE.CanvasTexture(null as any);
+  }
+  const size = 256; // 256x256 is 4x faster and uses 75% less GPU RAM on mobile
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    const imgData = ctx.createImageData(size, size);
+    const data = imgData.data;
+    const threadFreq = 16; // Interwoven yarns pattern
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const tileX = Math.floor(x / threadFreq);
+        const tileY = Math.floor(y / threadFreq);
+        const isHorizontal = (tileX + tileY) % 2 === 0;
+
+        const u = (x % threadFreq) / threadFreq;
+        const v = (y % threadFreq) / threadFreq;
+
+        let dx = 0;
+        let dy = 0;
+        if (isHorizontal) {
+          dy = Math.sin((v - 0.5) * Math.PI) * 0.7;
+          dx = Math.sin((u - 0.5) * Math.PI * 0.2) * 0.15;
+        } else {
+          dx = Math.sin((u - 0.5) * Math.PI) * 0.7;
+          dy = Math.sin((v - 0.5) * Math.PI * 0.2) * 0.15;
+        }
+
+        const fiberNoise = (Math.random() - 0.5) * 0.12;
+        dx += fiberNoise;
+        dy += fiberNoise;
+
+        const len = Math.sqrt(dx * dx + dy * dy + 1);
+        const nx = (dx / len) * 0.5 + 0.5;
+        const ny = (dy / len) * 0.5 + 0.5;
+        const nz = (1 / len) * 0.5 + 0.5;
+
+        const idx = (y * size + x) * 4;
+        data[idx] = Math.round(nx * 255);
+        data[idx + 1] = Math.round(ny * 255);
+        data[idx + 2] = Math.round(nz * 255);
+        data[idx + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(16, 16);
+  cachedWeaveNormalMap = texture;
+  return texture;
+}
+
+// Fabric Swatch Texture Loader Cache
+const fabricTextureLoader = new THREE.TextureLoader();
+const fabricTextureMap = new Map<string, THREE.Texture>();
+
+function loadFabricTexture(imagePath: string, onLoad: (tex: THREE.Texture) => void) {
+  if (fabricTextureMap.has(imagePath)) {
+    onLoad(fabricTextureMap.get(imagePath)!);
+    return;
+  }
+  fabricTextureLoader.load(
+    imagePath,
+    (tex) => {
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(5, 5); // Natural scale repeat across cushions
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.needsUpdate = true;
+      fabricTextureMap.set(imagePath, tex);
+      onLoad(tex);
+    },
+    undefined,
+    (err) => {
+      console.warn("Could not load fabric texture:", imagePath, err);
+    }
+  );
+}
+
 export default function ProductDetailPage() {
   const router = useRouter();
   const params = useParams();
   const id = params.id as string;
   const product = getProductById(id);
+
+  const isTable = Boolean(
+    product && (
+      product.category === "dining-table" ||
+      product.category === "corner-table" ||
+      product.category === "coffee-table" ||
+      product.category === "coffee-corner-table" ||
+      product.category === "Dining Tables" ||
+      product.category === "Corner tables" ||
+      product.category === "teapoy"
+    )
+  );
 
   // Fallback if product not found
   if (!product) {
@@ -43,7 +189,7 @@ export default function ProductDetailPage() {
         <Header />
         <main className="flex-grow flex flex-col items-center justify-center py-24 px-6 pt-[72px] sm:pt-[88px]">
           <h1 className="font-display text-2xl font-bold mb-4">Product Not Found</h1>
-          <p className="font-sans text-on-surface-variant mb-6">The requested sofa collection does not exist.</p>
+          <p className="font-sans text-on-surface-variant mb-6">The requested luxury collection item does not exist.</p>
           <Link href="/collections" className="bg-charcoal-ink text-white font-sans text-label-caps py-3 px-6 rounded-sm uppercase tracking-wider text-xs">
             Back to Collections
           </Link>
@@ -69,6 +215,7 @@ export default function ProductDetailPage() {
   const [selectedFabric, setSelectedFabric] = useState(FABRIC_SWATCHES[0].name);
   const [selectedSteel, setSelectedSteel] = useState(STEEL_FINISHES[0].name);
   const [studioTab, setStudioTab] = useState<"3d" | "sketch" | "ar">("3d");
+  const [studioBackdrop, setStudioBackdrop] = useState<"dark" | "light">("dark");
   const [showAR, setShowAR] = useState(false);
   const [arCameraActive, setArCameraActive] = useState(false);
   const [arCameraError, setArCameraError] = useState<string | null>(null);
@@ -91,9 +238,15 @@ export default function ProductDetailPage() {
 
   // Dynamic configuration details and 3D availability
   const currentConfig: ConfigDetails = getSofaConfigSpec(selectedConfig);
-  const seaterModelUrl = product ? getProductModelForSeater(product, selectedConfig) : undefined;
-  const hasConfig3D = Boolean(seaterModelUrl || (currentConfig.has3D && (currentConfig.modelUrl || (product as any).modelUrl)));
-  const activeModelUrl = seaterModelUrl || (currentConfig.has3D ? (currentConfig.modelUrl || (product as any).modelUrl) : null);
+  const seaterModelUrl = !isTable && product ? getProductModelForSeater(product, selectedConfig) : undefined;
+  const hasConfig3D = Boolean(
+    isTable
+      ? (product as any).modelUrl
+      : (seaterModelUrl || (currentConfig.has3D && (currentConfig.modelUrl || (product as any).modelUrl)))
+  );
+  const activeModelUrl = isTable
+    ? (product as any).modelUrl
+    : (seaterModelUrl || (currentConfig.has3D ? (currentConfig.modelUrl || (product as any).modelUrl) : null));
 
   // AR functions: Live Camera AR
   const startCameraAR = async () => {
@@ -101,40 +254,42 @@ export default function ProductDetailPage() {
     try {
       if (typeof window === "undefined" || typeof navigator === "undefined") return;
 
-      const nav = navigator as any;
-      const hasGetUserMedia = Boolean(
-        window.isSecureContext &&
-        nav.mediaDevices &&
-        typeof nav.mediaDevices.getUserMedia === "function"
-      );
-
-      if (!hasGetUserMedia) {
-        setArCameraError(
-          isAndroidDevice
-            ? "In-browser camera requires HTTPS. Tap 'Launch Android AR (Scene Viewer)' to view in native AR."
-            : "Live camera AR requires a secure HTTPS connection. Please scan the QR code with your phone."
-        );
-        setShowAR(true);
-        return;
-      }
-
       if (!hasConfig3D) {
         setSelectedConfig("Three Seater");
       }
+
+      const nav = navigator as any;
+      if (!nav.mediaDevices || typeof nav.mediaDevices.getUserMedia !== "function") {
+        setArCameraError("Camera access requires a secure connection or permission.");
+        setArCameraActive(false);
+        setStudioTab("ar");
+        return;
+      }
+
+      // Fast, lightweight mobile constraints (720p/1080p, 30fps) - avoids heavy 4K sensor lag on Android
       const stream = await nav.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } }
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
+          frameRate: { ideal: 30, max: 30 }
+        },
+        audio: false
       });
       mediaStreamRef.current = stream;
       setArCameraActive(true);
       setStudioTab("ar");
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch((e) => console.log(e));
+      }
     } catch (err: any) {
-      console.error("Camera access error:", err);
+      console.warn("Camera access error:", err);
+      setArCameraActive(false);
+      setStudioTab("ar");
       setArCameraError(
-        isAndroidDevice
-          ? "Camera permission was not granted. Tap 'Launch Android AR (Scene Viewer)' below for native AR."
-          : "Camera access could not be started. Please allow camera permissions in your browser or scan the QR Code."
+        "Camera permission needed. Please allow camera access in browser to view in real space."
       );
-      setShowAR(true);
     }
   };
 
@@ -194,7 +349,7 @@ export default function ProductDetailPage() {
     if (typeof window === "undefined") return "";
     let origin = window.location.origin;
     if (origin.includes("localhost")) {
-      origin = origin.replace("localhost", "10.194.190.57");
+      origin = origin.replace("localhost", "10.125.183.57");
     }
     return `${origin}/products/${id}?ar=true&fabric=${encodeURIComponent(selectedFabric)}&steel=${encodeURIComponent(selectedSteel)}&seater=${encodeURIComponent(selectedConfig)}`;
   };
@@ -206,18 +361,6 @@ export default function ProductDetailPage() {
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
     }
-  };
-
-  const handleOpenSceneViewer = () => {
-    if (typeof window === "undefined") return;
-    let origin = window.location.origin;
-    if (origin.includes("localhost")) {
-      origin = origin.replace("localhost", "10.194.190.57");
-    }
-    const currentModel = activeModelUrl || "/models/sofa7.glb";
-    const modelFullUrl = currentModel.startsWith("http") ? currentModel : `${origin}${currentModel}`;
-    const sceneViewerUrl = `intent://arvr.google.com/scene-viewer/1.0?file=${encodeURIComponent(modelFullUrl)}&mode=ar_only&title=${encodeURIComponent("Stallion Stainless " + (product?.name || "Luxury") + " Sofa")}&resizable=true#Intent;scheme=https;package=com.google.ar.core;action=android.intent.action.VIEW;S.browser_fallback_url=https://developers.google.com/ar;end;`;
-    window.location.href = sceneViewerUrl;
   };
 
   const [localReviews, setLocalReviews] = useState<any[]>([]);
@@ -248,11 +391,27 @@ export default function ProductDetailPage() {
   const controlsRef = useRef<OrbitControls | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const shadowMeshRef = useRef<THREE.Mesh | null>(null);
+  const keyLightRef = useRef<THREE.DirectionalLight | null>(null);
+  const floorMeshRef = useRef<THREE.Mesh | null>(null);
   const defaultCamPosRef = useRef<{ pos: THREE.Vector3; target: THREE.Vector3 } | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const fabricMaterialRef = useRef<THREE.MeshPhysicalMaterial | THREE.MeshStandardMaterial | null>(null);
   const metalMaterialRef = useRef<THREE.MeshStandardMaterial | null>(null);
+  const marbleMaterialRef = useRef<THREE.MeshStandardMaterial | null>(null);
   const steelTexturesRef = useRef<Record<string, THREE.Texture>>({});
+
+  // Optimize WebGL GPU workload during live Camera AR mode
+  useEffect(() => {
+    if (keyLightRef.current) {
+      keyLightRef.current.castShadow = !arCameraActive;
+    }
+    if (floorMeshRef.current) {
+      floorMeshRef.current.visible = !arCameraActive;
+    }
+    if (rendererRef.current) {
+      rendererRef.current.shadowMap.enabled = !arCameraActive;
+    }
+  }, [arCameraActive]);
 
   const resetCameraView = () => {
     if (defaultCamPosRef.current && cameraRef.current && controlsRef.current) {
@@ -262,42 +421,45 @@ export default function ProductDetailPage() {
     }
   };
 
-  // Helper function to dynamically apply steel finish texture and physical metalness/roughness
+  // Helper function to dynamically apply steel finish physical PVD metalness, roughness, and color
   const applySteelFinish = (finishName: string) => {
     if (!metalMaterialRef.current) return;
     const mat = metalMaterialRef.current;
-    const tex = steelTexturesRef.current[finishName];
 
-    if (tex) {
-      mat.map = tex;
-      mat.color.set("#FFFFFF");
-      tex.needsUpdate = true;
-    } else {
-      mat.map = null;
-      if (finishName === "Golden") mat.color.set("#D4AF37");
-      else if (finishName === "Pink") mat.color.set("#B76E79");
-      else if (finishName === "Silver") mat.color.set("#E6E6E6");
-      else if (finishName === "MDF") mat.color.set("#C19A6B");
-    }
+    // Direct physical metallic PVD shading (3D models do not have UV attributes for texture mapping)
+    mat.map = null;
 
     if (finishName === "Golden") {
+      mat.color.set("#D4AF37");
       mat.metalness = 0.95;
-      mat.roughness = 0.15;
+      mat.roughness = 0.16;
     } else if (finishName === "Pink") {
+      mat.color.set("#C97A87");
       mat.metalness = 0.90;
       mat.roughness = 0.20;
     } else if (finishName === "Silver") {
+      mat.color.set("#E2E8F0");
       mat.metalness = 0.98;
-      mat.roughness = 0.08;
+      mat.roughness = 0.10;
     } else if (finishName === "MDF") {
-      mat.metalness = 0.05;
-      mat.roughness = 0.85;
+      mat.color.set("#A06A3B");
+      mat.metalness = 0.04;
+      mat.roughness = 0.80;
     }
     mat.needsUpdate = true;
 
     if (sceneRef.current) {
       sceneRef.current.traverse((child: any) => {
-        if (child.isMesh) {
+        if (!child.isMesh) return;
+        if (Array.isArray(child.material)) {
+          const metalIdx = child.userData?.metalMatIndex !== undefined 
+            ? child.userData.metalMatIndex 
+            : child.material.length - 1;
+          child.material[metalIdx] = mat;
+          child.material = [...child.material];
+        } else if (child.userData?.isMetal || child.material === mat) {
+          child.material = mat;
+        } else {
           const isMetal =
             child.name.toLowerCase().includes("metal") ||
             child.name.toLowerCase().includes("feet") ||
@@ -306,30 +468,12 @@ export default function ProductDetailPage() {
             (child.material?.name && child.material.name.toLowerCase().includes("metal"));
           if (isMetal) {
             child.material = mat;
+            child.userData.isMetal = true;
           }
         }
       });
     }
   };
-
-  // Preload all steel finish textures on mount
-  useEffect(() => {
-    const loader = new THREE.TextureLoader();
-    STEEL_FINISHES.forEach(st => {
-      if (!steelTexturesRef.current[st.name]) {
-        loader.load(st.image, (tex) => {
-          tex.wrapS = THREE.RepeatWrapping;
-          tex.wrapT = THREE.RepeatWrapping;
-          tex.repeat.set(3, 3);
-          tex.colorSpace = THREE.SRGBColorSpace;
-          steelTexturesRef.current[st.name] = tex;
-          if (selectedSteel === st.name && metalMaterialRef.current) {
-            applySteelFinish(st.name);
-          }
-        });
-      }
-    });
-  }, []);
 
   // Sync selected configuration and fabric when product changes
   useEffect(() => {
@@ -352,8 +496,188 @@ export default function ProductDetailPage() {
     }
   }, [product, seaterParam]);
 
-  // Filter out the current product for similar choices
-  const similarProducts = PRODUCTS.filter(p => p.id !== product.id).slice(0, 4);
+  // Filter out the current product for similar choices within the same category
+  const similarProducts = PRODUCTS.filter(p => p.id !== product.id && p.category === product.category).slice(0, 4);
+
+  // Helper function to prepare mesh materials (separates marble tabletop from steel base for tables, and fabric from base for sofas)
+  const setupMeshMaterials = (
+    rootObj: THREE.Object3D,
+    forTable: boolean,
+    metalMat: THREE.Material,
+    fabricMat: THREE.Material,
+    marbleMat: THREE.Material
+  ) => {
+    rootObj.traverse((child: any) => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+
+      if (!forTable) {
+        // Sofa logic: check for explicit metal feet/legs first (e.g. ARIS)
+        const isMetal =
+          child.name.toLowerCase().includes("metal") ||
+          child.name.toLowerCase().includes("feet") ||
+          child.name.toLowerCase().includes("leg") ||
+          child.name.toLowerCase().includes("base") ||
+          (child.material?.name && child.material.name.toLowerCase().includes("metal"));
+        if (isMetal) {
+          child.material = metalMat;
+          child.userData.isMetal = true;
+          return;
+        }
+
+        const isFabric =
+          child.name.toLowerCase().includes("sofa") ||
+          child.name.toLowerCase().includes("fabric") ||
+          child.name.toLowerCase().includes("cushion") ||
+          (child.material?.name && child.material.name.toLowerCase().includes("fabric"));
+        if (isFabric && child.geometry) {
+          generateTriplanarUVs(child.geometry, 3.5);
+          child.material = fabricMat;
+          return;
+        }
+
+        // Single unified mesh sofa (e.g. BARON, ATLAS, AURA, etc.):
+        const geo = child.geometry;
+        if (!geo || !geo.attributes.position) {
+          child.material = fabricMat;
+          return;
+        }
+
+        const count = geo.attributes.position.count;
+        // For large meshes (>50k vertices), assign fabric directly to avoid blocking mobile JS thread
+        if (count > 50000) {
+          generateTriplanarUVs(geo, 3.5);
+          child.material = fabricMat;
+          return;
+        }
+
+        let processGeo = geo;
+        if (processGeo.index) {
+          processGeo = processGeo.toNonIndexed();
+          child.geometry = processGeo;
+        }
+        processGeo.computeBoundingBox();
+        const bb = processGeo.boundingBox;
+        if (!bb) {
+          generateTriplanarUVs(processGeo, 3.5);
+          child.material = fabricMat;
+          return;
+        }
+
+        // Generate procedural triplanar UV coordinates so fabric texture & micro-weave map flawlessly
+        generateTriplanarUVs(processGeo, 3.5);
+
+        const height = bb.max.y - bb.min.y;
+        const cutoffBase = bb.min.y + 0.14 * height; // Lowest 14% is steel base/feet
+        const pos = processGeo.attributes.position;
+        const pCount = pos.count;
+
+        // Sofa Upholstery (all cushions, arms, backrest) + Metal Base / Legs
+        const fabricIndices: number[] = [];
+        const baseIndices: number[] = [];
+
+        for (let i = 0; i < pCount; i += 3) {
+          const yAvg = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;
+          if (yAvg > cutoffBase) {
+            fabricIndices.push(i, i + 1, i + 2);
+          } else {
+            baseIndices.push(i, i + 1, i + 2);
+          }
+        }
+
+        if (fabricIndices.length > 0 && baseIndices.length > 0) {
+          const newIndices = new Uint32Array(fabricIndices.length + baseIndices.length);
+          newIndices.set(fabricIndices, 0);
+          newIndices.set(baseIndices, fabricIndices.length);
+
+          processGeo.setIndex(new THREE.BufferAttribute(newIndices, 1));
+          processGeo.clearGroups();
+          processGeo.addGroup(0, fabricIndices.length, 0); // Group 0 = Fabric Upholstery
+          processGeo.addGroup(fabricIndices.length, baseIndices.length, 1); // Group 1 = Metal Base / Legs
+          child.material = [fabricMat, metalMat];
+          child.userData.metalMatIndex = 1;
+        } else {
+          child.material = fabricMat;
+        }
+        return;
+      }
+
+      // Table logic: Only color change in bottom base, no top change in 3d models
+      const name = child.name.toLowerCase();
+      const isExplicitTop = name.includes("top") || name.includes("marble") || name.includes("glass");
+      const isExplicitBase = name.includes("base") || name.includes("leg") || name.includes("metal") || name.includes("frame");
+
+      if (isExplicitTop) {
+        child.material = marbleMat;
+        return;
+      }
+      if (isExplicitBase) {
+        child.material = metalMat;
+        child.userData.isMetal = true;
+        return;
+      }
+
+      // Unified mesh table: split tabletop and base by height
+      const geo = child.geometry;
+      if (!geo || !geo.attributes.position) {
+        child.material = metalMat;
+        child.userData.isMetal = true;
+        return;
+      }
+
+      if (geo.attributes.position.count > 50000) {
+        child.material = metalMat;
+        child.userData.isMetal = true;
+        return;
+      }
+
+      let processGeo = geo;
+      if (processGeo.index) {
+        processGeo = processGeo.toNonIndexed();
+        child.geometry = processGeo;
+      }
+      processGeo.computeBoundingBox();
+      const bb = processGeo.boundingBox;
+      if (!bb) {
+        child.material = metalMat;
+        child.userData.isMetal = true;
+        return;
+      }
+      const height = bb.max.y - bb.min.y;
+      const cutoff = bb.max.y - 0.09 * height; // Tabletop stone slab is top 9%
+      const pos = processGeo.attributes.position;
+      const count = pos.count;
+
+      const topIndices: number[] = [];
+      const baseIndices: number[] = [];
+
+      for (let i = 0; i < count; i += 3) {
+        const yAvg = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;
+        if (yAvg >= cutoff) {
+          topIndices.push(i, i + 1, i + 2);
+        } else {
+          baseIndices.push(i, i + 1, i + 2);
+        }
+      }
+
+      if (topIndices.length > 0 && baseIndices.length > 0) {
+        const newIndices = new Uint32Array(topIndices.length + baseIndices.length);
+        newIndices.set(topIndices, 0);
+        newIndices.set(baseIndices, topIndices.length);
+
+        processGeo.setIndex(new THREE.BufferAttribute(newIndices, 1));
+        processGeo.clearGroups();
+        processGeo.addGroup(0, topIndices.length, 0); // Group 0 = Tabletop (Marble Top)
+        processGeo.addGroup(topIndices.length, baseIndices.length, 1); // Group 1 = Base (Metal Base)
+        child.material = [marbleMat, metalMat];
+        child.userData.metalMatIndex = 1;
+      } else {
+        child.material = metalMat;
+        child.userData.isMetal = true;
+      }
+    });
+  };
 
   // Initialize 3D Viewer inside useEffect
   useEffect(() => {
@@ -361,8 +685,9 @@ export default function ProductDetailPage() {
     let isMounted = true;
 
     const container = canvasRef.current;
-    const width = container.clientWidth || 600;
-    const height = container.clientHeight || 400;
+    const rect = container.getBoundingClientRect();
+    const width = rect.width || container.clientWidth || 360;
+    const height = rect.height || container.clientHeight || Math.round(width * (2 / 3)) || 240;
 
     // Create Scene, Camera, Renderer
     const scene = new THREE.Scene();
@@ -371,15 +696,43 @@ export default function ProductDetailPage() {
     camera.position.set(3.8, 2.2, 4.4);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(0x000000, 0); // transparent background
+    const isMobile =
+      typeof navigator !== "undefined" &&
+      (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent) ||
+        window.innerWidth < 1024);
+
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: !isMobile,
+        alpha: true,
+        powerPreference: isMobile ? "default" : "high-performance",
+      });
+    } catch {
+      renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
+    }
+    renderer.setSize(width, height, false);
+    renderer.domElement.style.width = "100%";
+    renderer.domElement.style.height = "100%";
+    renderer.domElement.style.display = "block";
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2));
+    renderer.setClearColor(0x000000, 0); // transparent background so studio stage spotlight highlights the model
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
+    renderer.toneMappingExposure = 0.96;
+
+    // Enable soft shadow mapping with mobile-calibrated resolutions
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+
+    const handleContextLost = (event: Event) => {
+      event.preventDefault();
+      console.warn("WebGL Context Lost - preventing browser crash on mobile");
+    };
+    renderer.domElement.addEventListener("webglcontextlost", handleContextLost, false);
 
     // Studio Environment Reflections for Realistic Metallic Sheen
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -398,31 +751,75 @@ export default function ProductDetailPage() {
     controls.maxDistance = 9.0;
     controlsRef.current = controls;
 
-    // Lights
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xd0d0d0, 1.3);
+    // Calibrated High-Definition Studio Lighting with Self-Shadowing Detailing
+    // 1. Soft Ambient / Floor Occlusion (low ambient so shadow crevices pop with crisp depth)
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x121316, 0.35);
     scene.add(hemiLight);
 
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.5);
-    keyLight.position.set(5, 8, 6);
+    // 2. Focused Key Light: High-definition shadow-casting directional spotlight
+    // Casts crisp architectural self-shadows across cushions, tabletops, and steel undercarriages
+    const keyLight = new THREE.DirectionalLight(0xfffbf2, 1.25);
+    keyLight.position.set(4.2, 7.5, 4.6);
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.width = isMobile ? 1024 : 2048;
+    keyLight.shadow.mapSize.height = isMobile ? 1024 : 2048;
+    keyLight.shadow.camera.near = 0.5;
+    keyLight.shadow.camera.far = 25;
+    const d = 3.5;
+    keyLight.shadow.camera.left = -d;
+    keyLight.shadow.camera.right = d;
+    keyLight.shadow.camera.top = d;
+    keyLight.shadow.camera.bottom = -d;
+    keyLight.shadow.bias = -0.0004;
+    keyLight.shadow.normalBias = 0.025; // Brings out deep crevice shadows without shadow acne
     scene.add(keyLight);
+    keyLightRef.current = keyLight;
 
-    const fillLight = new THREE.DirectionalLight(0xf5f5f5, 0.8);
-    fillLight.position.set(-6, 5, -4);
-    scene.add(fillLight);
+    // 3. Secondary Overhead Fill Light: Casts soft secondary shadows for multidimensional volume
+    const topFillLight = new THREE.DirectionalLight(0xf2eff5, 0.40);
+    topFillLight.position.set(-2.5, 6.2, 2.5);
+    topFillLight.castShadow = !isMobile;
+    topFillLight.shadow.mapSize.width = 1024;
+    topFillLight.shadow.mapSize.height = 1024;
+    topFillLight.shadow.camera.near = 0.5;
+    topFillLight.shadow.camera.far = 20;
+    const d2 = 3.0;
+    topFillLight.shadow.camera.left = -d2;
+    topFillLight.shadow.camera.right = d2;
+    topFillLight.shadow.camera.top = d2;
+    topFillLight.shadow.camera.bottom = -d2;
+    topFillLight.shadow.bias = -0.0005;
+    topFillLight.shadow.normalBias = 0.02;
+    scene.add(topFillLight);
 
-    const frontLight = new THREE.DirectionalLight(0xffffff, 0.4);
-    frontLight.position.set(0, 2, 5);
-    scene.add(frontLight);
+    // 4. Crisp Rim / Contour Light: Silhouettes the model curves cleanly against the dark stage
+    const rimLight = new THREE.DirectionalLight(0xdde8f8, 0.75);
+    rimLight.position.set(-5.0, 5.5, -4.5);
+    scene.add(rimLight);
 
-    // Soft Ground Contact Shadow
+    // 5. Floor Dynamic Shadow Receiver (Captures real-time cast shadows on the floor)
+    const floorGeo = new THREE.PlaneGeometry(18, 18);
+    const floorMat = new THREE.ShadowMaterial({
+      opacity: 0.50,
+      depthWrite: false,
+    });
+    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+    floorMesh.rotation.x = -Math.PI / 2;
+    floorMesh.position.y = 0.001;
+    floorMesh.receiveShadow = true;
+    scene.add(floorMesh);
+    floorMeshRef.current = floorMesh;
+
+    // 6. Soft Ambient Ground Contact Shadow Disc (Anchors the base firmly to the floor)
     const shadowCanvas = document.createElement("canvas");
     shadowCanvas.width = 256;
     shadowCanvas.height = 256;
     const sCtx = shadowCanvas.getContext("2d");
     if (sCtx) {
-      const grad = sCtx.createRadialGradient(128, 128, 25, 128, 128, 120);
-      grad.addColorStop(0, "rgba(0, 0, 0, 0.32)");
-      grad.addColorStop(0.5, "rgba(0, 0, 0, 0.12)");
+      const grad = sCtx.createRadialGradient(128, 128, 16, 128, 128, 120);
+      grad.addColorStop(0, "rgba(0, 0, 0, 0.88)");
+      grad.addColorStop(0.35, "rgba(0, 0, 0, 0.58)");
+      grad.addColorStop(0.70, "rgba(0, 0, 0, 0.20)");
       grad.addColorStop(1, "rgba(0, 0, 0, 0)");
       sCtx.fillStyle = grad;
       sCtx.fillRect(0, 0, 256, 256);
@@ -432,7 +829,7 @@ export default function ProductDetailPage() {
     const shadowMat = new THREE.MeshBasicMaterial({
       map: shadowTexture,
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.85,
       depthWrite: false,
     });
     const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
@@ -469,6 +866,12 @@ export default function ProductDetailPage() {
       const targetY = Math.max(0.35, finalCenter.y);
       controls.target.set(0, targetY, 0);
 
+      // Direct shadow spotlights to center on the model for crisp detailing
+      keyLight.target.position.set(0, targetY * 0.7, 0);
+      keyLight.target.updateMatrixWorld();
+      topFillLight.target.position.set(0, targetY * 0.7, 0);
+      topFillLight.target.updateMatrixWorld();
+
       // Size ground shadow to match the actual footprint of the sofa
       shadowMesh.position.set(0, 0.003, 0);
       shadowMesh.scale.set(
@@ -479,16 +882,22 @@ export default function ProductDetailPage() {
 
       // 4. Calculate camera distance to frame the model perfectly in the viewport
       const fovRad = camera.fov * (Math.PI / 180);
-      const aspect = camera.aspect || (width / height);
+      const r = container.getBoundingClientRect();
+      const currentWidth = r.width || container.clientWidth || 360;
+      const currentHeight = r.height || container.clientHeight || 240;
+      const aspect = currentWidth / currentHeight;
+      camera.aspect = aspect;
+      camera.updateProjectionMatrix();
 
       // Radius of bounding sphere around the sofa
       const sphere = finalBox.getBoundingSphere(new THREE.Sphere());
       const radius = Math.max(sphere.radius, 1.6);
 
-      // Distance required to fit both height and width with balanced margin
+      // Distance required to fit both height and width with balanced margin (more breathing room on mobile portrait)
       const distVertical = radius / Math.sin(fovRad / 2);
       const distHorizontal = radius / (Math.sin(fovRad / 2) * aspect);
-      const fitDistance = Math.max(distVertical, distHorizontal) * 1.20; // 20% breathing room
+      const paddingFactor = isMobile ? 1.35 : 1.20;
+      const fitDistance = Math.max(distVertical, distHorizontal) * paddingFactor;
 
       // Camera angles: ~21 degrees elevation, ~42 degrees azimuth
       const elevation = 0.37;
@@ -524,15 +933,44 @@ export default function ProductDetailPage() {
     metalMaterialRef.current = metalMaterial;
     applySteelFinish(selectedSteel);
 
-    const fabricMaterial = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(selectedFabricObj.hex),
-      roughness: 0.8,
-      metalness: 0.02,
-      sheen: 0.8,
-      sheenColor: new THREE.Color(selectedFabricObj.hex),
-      sheenRoughness: 0.45,
-    });
+    const microWeaveNormal = getFabricMicroWeaveNormalMap();
+
+    const fabricColorHex = selectedFabricObj.hex;
+    const fabricMaterial = isMobile
+      ? new THREE.MeshStandardMaterial({
+          color: new THREE.Color(fabricColorHex),
+          roughness: 0.78,
+          metalness: 0.02,
+        })
+      : new THREE.MeshPhysicalMaterial({
+          color: new THREE.Color(fabricColorHex),
+          roughness: 0.80,
+          metalness: 0.02,
+          sheen: 0.85,
+          sheenColor: new THREE.Color(fabricColorHex),
+          sheenRoughness: 0.45,
+          normalMap: microWeaveNormal,
+        });
+    if (!isMobile && "normalScale" in fabricMaterial) {
+      (fabricMaterial as any).normalScale.set(0.65, 0.65);
+    }
     fabricMaterialRef.current = fabricMaterial;
+
+    // Apply high-res photographic woven fabric texture
+    loadFabricTexture(selectedFabricObj.image, (tex) => {
+      if (fabricMaterialRef.current) {
+        fabricMaterialRef.current.map = tex;
+        fabricMaterialRef.current.color.set(0xffffff);
+        fabricMaterialRef.current.needsUpdate = true;
+      }
+    });
+
+    const marbleMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0xf0ede6),
+      roughness: 0.22,
+      metalness: 0.05,
+    });
+    marbleMaterialRef.current = marbleMaterial;
 
     const modelUrl = activeModelUrl;
 
@@ -540,31 +978,11 @@ export default function ProductDetailPage() {
       const cachedScene = gltfSceneCache.get(modelUrl);
       if (cachedScene) {
         const model = cachedScene.clone(true);
-        const textures = gltfTextureCache.get(modelUrl);
-        if (textures?.map) fabricMaterial.map = textures.map;
-        if (textures?.normalMap) {
-          fabricMaterial.normalMap = textures.normalMap;
-          fabricMaterial.normalScale.set(0.7, 0.7);
-        }
-        if (textures?.roughnessMap) fabricMaterial.roughnessMap = textures.roughnessMap;
-        fabricMaterial.needsUpdate = true;
-
-        model.traverse((child: any) => {
-          if (child.isMesh) {
-            const isMetal =
-              child.name.toLowerCase().includes("metal") ||
-              child.name.toLowerCase().includes("feet") ||
-              child.name.toLowerCase().includes("leg") ||
-              child.name.toLowerCase().includes("base") ||
-              (child.material?.name && child.material.name.toLowerCase().includes("metal"));
-            child.material = isMetal ? metalMaterial : fabricMaterial;
-            child.castShadow = true;
-            child.receiveShadow = true;
-          }
-        });
+        setupMeshMaterials(model, isTable, metalMaterial, fabricMaterial, marbleMaterial);
 
         frameModelInScene(model);
         scene.add(model);
+        applySteelFinish(selectedSteel);
         setIsModelLoading(false);
       } else {
         setIsModelLoading(true);
@@ -577,57 +995,11 @@ export default function ProductDetailPage() {
             if (!isMounted) return;
             gltfSceneCache.set(modelUrl, gltf.scene);
 
-            let textures = gltfTextureCache.get(modelUrl);
-            if (!textures) {
-              let map: THREE.Texture | undefined;
-              let normalMap: THREE.Texture | undefined;
-              let roughnessMap: THREE.Texture | undefined;
-              gltf.scene.traverse((child: any) => {
-                if (child.isMesh && child.material) {
-                  const mat = child.material;
-                  if (!map && mat.map) map = mat.map;
-                  if (!normalMap && mat.normalMap) normalMap = mat.normalMap;
-                  if (!roughnessMap && mat.roughnessMap) roughnessMap = mat.roughnessMap;
-                }
-              });
-              textures = { map, normalMap, roughnessMap };
-              gltfTextureCache.set(modelUrl, textures);
-            }
-
-            if (textures.map) {
-              textures.map.wrapS = THREE.RepeatWrapping;
-              textures.map.wrapT = THREE.RepeatWrapping;
-              fabricMaterial.map = textures.map;
-            }
-            if (textures.normalMap) {
-              textures.normalMap.wrapS = THREE.RepeatWrapping;
-              textures.normalMap.wrapT = THREE.RepeatWrapping;
-              fabricMaterial.normalMap = textures.normalMap;
-              fabricMaterial.normalScale.set(0.7, 0.7);
-            }
-            if (textures.roughnessMap) {
-              textures.roughnessMap.wrapS = THREE.RepeatWrapping;
-              textures.roughnessMap.wrapT = THREE.RepeatWrapping;
-              fabricMaterial.roughnessMap = textures.roughnessMap;
-            }
-            fabricMaterial.needsUpdate = true;
-
-            gltf.scene.traverse((child: any) => {
-              if (child.isMesh) {
-                const isMetal =
-                  child.name.toLowerCase().includes("metal") ||
-                  child.name.toLowerCase().includes("feet") ||
-                  child.name.toLowerCase().includes("leg") ||
-                  child.name.toLowerCase().includes("base") ||
-                  (child.material?.name && child.material.name.toLowerCase().includes("metal"));
-                child.material = isMetal ? metalMaterial : fabricMaterial;
-                child.castShadow = true;
-                child.receiveShadow = true;
-              }
-            });
+            setupMeshMaterials(gltf.scene, isTable, metalMaterial, fabricMaterial, marbleMaterial);
 
             frameModelInScene(gltf.scene);
             scene.add(gltf.scene);
+            applySteelFinish(selectedSteel);
             setIsModelLoading(false);
           },
           (xhr) => {
@@ -654,14 +1026,16 @@ export default function ProductDetailPage() {
     animate();
 
     // Resize Handler via ResizeObserver
-    const resizeObserver = new ResizeObserver(() => {
+    const resizeObserver = new ResizeObserver((entries) => {
       if (!container || !rendererRef.current) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
+      const entry = entries[0];
+      const r = container.getBoundingClientRect();
+      const w = entry?.contentRect?.width || r.width || container.clientWidth;
+      const h = entry?.contentRect?.height || r.height || container.clientHeight;
       if (w > 0 && h > 0) {
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
-        rendererRef.current.setSize(w, h);
+        rendererRef.current.setSize(w, h, false);
       }
     });
     resizeObserver.observe(container);
@@ -688,10 +1062,16 @@ export default function ProductDetailPage() {
     if (fabricMaterialRef.current) {
       const selectedFabricObj = FABRIC_SWATCHES.find(f => f.name === selectedFabric) || FABRIC_SWATCHES[0];
       const color = new THREE.Color(selectedFabricObj.hex);
-      fabricMaterialRef.current.color.copy(color);
       if ("sheenColor" in fabricMaterialRef.current && (fabricMaterialRef.current as any).sheenColor) {
         (fabricMaterialRef.current as any).sheenColor.copy(color);
       }
+      loadFabricTexture(selectedFabricObj.image, (tex) => {
+        if (fabricMaterialRef.current) {
+          fabricMaterialRef.current.map = tex;
+          fabricMaterialRef.current.color.set(0xffffff);
+          fabricMaterialRef.current.needsUpdate = true;
+        }
+      });
       fabricMaterialRef.current.needsUpdate = true;
     }
   }, [selectedFabric]);
@@ -838,15 +1218,17 @@ export default function ProductDetailPage() {
     if (!product) return;
     const selectedFabricObj = FABRIC_SWATCHES.find(f => f.name === selectedFabric) || FABRIC_SWATCHES[0];
     const cartItem = {
-      id: `${product.id}-${selectedFabric.replace(/\s+/g, "-")}-${selectedSteel}-${selectedConfig.replace(/\s+/g, "-")}`,
+      id: isTable
+        ? `${product.id}-${selectedSteel}`
+        : `${product.id}-${selectedFabric.replace(/\s+/g, "-")}-${selectedSteel}-${selectedConfig.replace(/\s+/g, "-")}`,
       productId: product.id,
       name: product.name,
-      color: selectedFabric,
-      colorHex: selectedFabricObj.hex || selectedFabricObj.image,
-      configuration: selectedConfig,
+      color: isTable ? `${selectedSteel} Finish` : selectedFabric,
+      colorHex: isTable ? (selectedSteelObj.hex || "#D4AF37") : (selectedFabricObj.hex || selectedFabricObj.image),
+      configuration: isTable ? "Standard Architectural" : selectedConfig,
       steelFinish: selectedSteel,
       quantity: quantity,
-      price: getPriceForConfig(product.price, selectedConfig),
+      price: isTable ? product.price : getPriceForConfig(product.price, selectedConfig),
       tagline: product.tagline,
       image: displayImages[0] || product.images[0]
     };
@@ -896,9 +1278,9 @@ export default function ProductDetailPage() {
     handleSelectConfig(SOFA_SUBSECTIONS[newIndex].name);
   };
 
-  const activeSketchUrl = product
-    ? getProductSketchForSeater(product, selectedConfig)
-    : currentConfig.schematicImage;
+  const activeSketchUrl = isTable
+    ? ((product as any).schematicImage || currentConfig.schematicImage)
+    : (getProductSketchForSeater(product, selectedConfig) || currentConfig.schematicImage);
 
   const currentActiveImg = displayImages[activeImageIdx] || "";
   const isHImage = Boolean(
@@ -918,7 +1300,15 @@ export default function ProductDetailPage() {
         {/* Desktop SideNavBar */}
         <div className="hidden lg:block w-64 flex-shrink-0 border-r border-stainless-silver bg-warm-ivory z-40">
           <Sidebar
-            selectedCategory="sofa"
+            selectedCategory={
+              product.category === "dining-table"
+                ? "dining-table"
+                : product.category === "corner-table"
+                ? "corner-table"
+                : product.category === "teapoy"
+                ? "teapoy"
+                : "sofa"
+            }
             selectedConfig={selectedConfig}
             onSelectConfig={setSelectedConfig}
             currentProductId={product.id}
@@ -987,19 +1377,57 @@ export default function ProductDetailPage() {
           </h1>
         </div>
 
-        {/* Desktop Breadcrumbs: [Home] [Collections] [Subsection] [Product Name] */}
-        <div className="hidden md:flex mb-8 items-center justify-between gap-3 flex-wrap">
-          <nav className="flex items-center gap-2 text-on-surface-variant font-sans text-xs tracking-wider uppercase overflow-x-auto whitespace-nowrap pb-1">
-            <Link href="/" className="hover:text-charcoal-ink transition-colors">Home</Link>
-            <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
-            <Link href="/collections" className="hover:text-charcoal-ink transition-colors">Collections</Link>
-            <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
-            <Link href={`/collections/${matchingSubsection.id}`} className="hover:text-charcoal-ink transition-colors">
-              {matchingSubsection.name}
-            </Link>
-            <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
-            <span className="text-charcoal-ink font-semibold">{product.name}</span>
-          </nav>
+        {/* Desktop Breadcrumbs: [Back Button] [Home] [Collections] [Subsection] [Product Name] */}
+        <div className="hidden md:flex mb-8 items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== "undefined" && window.history.length > 1) {
+                  router.back();
+                } else {
+                  router.push("/collections");
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-stone-300 bg-white hover:bg-stone-100 hover:border-charcoal-ink text-charcoal-ink text-xs font-sans font-semibold tracking-wider uppercase transition-all shadow-2xs group cursor-pointer shrink-0"
+              title="Go Back"
+              aria-label="Go Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
+              <span>Back</span>
+            </button>
+
+            <div className="h-4 w-[1px] bg-stone-300 shrink-0" />
+
+            <nav className="flex items-center gap-2 text-on-surface-variant font-sans text-xs tracking-wider uppercase overflow-x-auto whitespace-nowrap">
+              <Link href="/" className="hover:text-charcoal-ink transition-colors">Home</Link>
+              <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
+              <Link href="/collections" className="hover:text-charcoal-ink transition-colors">Collections</Link>
+              <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
+              <Link
+                href={
+                  product.category === "dining-table"
+                    ? "/collections?category=dining-table"
+                    : product.category === "corner-table"
+                    ? "/collections?category=corner-table"
+                    : product.category === "teapoy"
+                    ? "/collections?category=teapoy"
+                    : `/collections/${matchingSubsection.id}`
+                }
+                className="hover:text-charcoal-ink transition-colors"
+              >
+                {product.category === "dining-table"
+                  ? "Dining Tables"
+                  : product.category === "corner-table"
+                  ? "Corner Tables"
+                  : product.category === "teapoy"
+                  ? "Teapoy"
+                  : matchingSubsection.name}
+              </Link>
+              <ChevronRight className="h-3.5 w-3.5 text-stone-400" />
+              <span className="text-charcoal-ink font-semibold">{product.name}</span>
+            </nav>
+          </div>
         </div>
 
         {/* Product Details Section: Photo Gallery & Overview */}
@@ -1161,17 +1589,28 @@ export default function ProductDetailPage() {
 
             {/* Current Customization Selection Pill (Mobile: 2 lines) */}
             <div className="flex lg:hidden flex-col gap-2 p-2.5 bg-warm-ivory border border-stainless-silver rounded-sm">
-              {/* Line 1: Three seater, Aris Champagne velvet, Golden Base in one line */}
+              {/* Line 1: In one line */}
               <div className="flex items-center gap-1.5 text-[11px] font-sans overflow-x-auto whitespace-nowrap scrollbar-none py-0.5 w-full">
-                <span className="px-1.5 py-0.5 bg-charcoal-ink text-white font-bold rounded-xs text-[9px] tracking-wider uppercase shrink-0">
-                  {selectedConfig}
-                </span>
-                <span className="text-stone-300 shrink-0">•</span>
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className="w-3 h-3 rounded-full border border-black/15 shadow-inner shrink-0" style={{ backgroundColor: selectedFabricObj.hex }} />
-                  <span className="font-semibold text-charcoal-ink text-[11px]">{selectedFabric}</span>
-                </div>
-                <span className="text-stone-300 shrink-0">•</span>
+                {!isTable ? (
+                  <>
+                    <span className="px-1.5 py-0.5 bg-charcoal-ink text-white font-bold rounded-xs text-[9px] tracking-wider uppercase shrink-0">
+                      {selectedConfig}
+                    </span>
+                    <span className="text-stone-300 shrink-0">•</span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="w-3 h-3 rounded-full border border-black/15 shadow-inner shrink-0" style={{ backgroundColor: selectedFabricObj.hex }} />
+                      <span className="font-semibold text-charcoal-ink text-[11px]">{selectedFabric}</span>
+                    </div>
+                    <span className="text-stone-300 shrink-0">•</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="px-1.5 py-0.5 bg-charcoal-ink text-white font-bold rounded-xs text-[9px] tracking-wider uppercase shrink-0">
+                      Fixed Marble Top
+                    </span>
+                    <span className="text-stone-300 shrink-0">•</span>
+                  </>
+                )}
                 <div className="flex items-center gap-1 shrink-0">
                   <span className="w-3 h-3 rounded-full border border-black/15 shadow-inner shrink-0" style={{ backgroundColor: selectedSteelObj.hex }} />
                   <span className="font-semibold text-stone-700 text-[11px]">{selectedSteel} Base</span>
@@ -1188,15 +1627,26 @@ export default function ProductDetailPage() {
             {/* Current Customization Selection Pill (Desktop) */}
             <div className="hidden lg:flex bg-warm-ivory border border-stainless-silver p-3 rounded-sm flex-wrap items-center justify-between gap-2.5">
               <div className="flex flex-wrap items-center gap-2 text-xs font-sans">
-                <span className="px-2 py-0.5 bg-charcoal-ink text-white font-bold rounded-xs text-[10px] tracking-wider uppercase">
-                  {selectedConfig}
-                </span>
-                <span className="text-stone-300">|</span>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-3.5 h-3.5 rounded-full border border-black/15 shadow-inner" style={{ backgroundColor: selectedFabricObj.hex }} />
-                  <span className="font-semibold text-charcoal-ink">{selectedFabric}</span>
-                </div>
-                <span className="text-stone-300">|</span>
+                {!isTable ? (
+                  <>
+                    <span className="px-2 py-0.5 bg-charcoal-ink text-white font-bold rounded-xs text-[10px] tracking-wider uppercase">
+                      {selectedConfig}
+                    </span>
+                    <span className="text-stone-300">|</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3.5 h-3.5 rounded-full border border-black/15 shadow-inner" style={{ backgroundColor: selectedFabricObj.hex }} />
+                      <span className="font-semibold text-charcoal-ink">{selectedFabric}</span>
+                    </div>
+                    <span className="text-stone-300">|</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="px-2 py-0.5 bg-charcoal-ink text-white font-bold rounded-xs text-[10px] tracking-wider uppercase">
+                      Fixed Marble Top
+                    </span>
+                    <span className="text-stone-300">|</span>
+                  </>
+                )}
                 <div className="flex items-center gap-1.5">
                   <span className="w-3.5 h-3.5 rounded-full border border-black/15 shadow-inner" style={{ backgroundColor: selectedSteelObj.hex }} />
                   <span className="font-semibold text-stone-700">{selectedSteel} Base</span>
@@ -1272,8 +1722,12 @@ export default function ProductDetailPage() {
                 {product.details.map((detail, idx) => (
                   <li key={idx}>{detail}</li>
                 ))}
-                <li>Anti-termite treated wood core</li>
-                <li>Double stitch tailoring seams</li>
+                {!isTable && (
+                  <>
+                    <li>Anti-termite treated hardwood structural core</li>
+                    <li>Double-stitched architectural tailoring seams</li>
+                  </>
+                )}
               </ul>
             </div>
           </div>
@@ -1309,10 +1763,13 @@ export default function ProductDetailPage() {
                   </div>
 
                   {/* Toggle Controls: 3D Model vs 2D Sketch vs AR View */}
-                  <div className="grid grid-cols-3 sm:flex rounded-sm p-0.5 bg-stone-200/80 border border-stone-300 w-full sm:w-auto">
+                  <div className="grid grid-cols-3 sm:flex rounded-sm p-0.5 bg-stone-200/80 border border-stone-300 w-full sm:w-auto z-30" style={{ touchAction: "manipulation" }}>
                     <button
                       type="button"
-                      onClick={() => {
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
                         if (arCameraActive) stopCameraAR();
                         setStudioTab("3d");
                       }}
@@ -1327,7 +1784,10 @@ export default function ProductDetailPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
                         if (arCameraActive) stopCameraAR();
                         setStudioTab("sketch");
                       }}
@@ -1342,7 +1802,13 @@ export default function ProductDetailPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setStudioTab("ar")}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setStudioTab("ar");
+                        startCameraAR();
+                      }}
                       className={`px-2 sm:px-3 py-1 text-[11px] sm:text-xs font-sans font-semibold rounded-xs transition-all flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer ${
                         studioTab === "ar"
                           ? "bg-white text-charcoal-ink shadow-xs"
@@ -1356,17 +1822,54 @@ export default function ProductDetailPage() {
                 </div>
 
                 {/* Studio Viewport (Aspect-[3/2] Frame Identical to Image View) */}
-                <div className={`relative w-full aspect-[3/2] ${arCameraActive ? "bg-black" : "bg-warm-ivory"} border border-stainless-silver border-t-0 overflow-hidden rounded-b-sm flex items-center justify-center`}>
+                <div
+                  className={`relative w-full aspect-[3/2] border border-stainless-silver border-t-0 overflow-hidden rounded-b-sm flex items-center justify-center transition-colors duration-500 ${
+                    arCameraActive
+                      ? "bg-black"
+                      : studioBackdrop === "dark"
+                      ? "bg-[#101114]"
+                      : "bg-[#f5f3ef]"
+                  }`}
+                >
+                  {/* Studio Central Spotlight Aura (Highlights the 3D model in the center, darkening toward edges) */}
+                  {!arCameraActive && studioTab === "3d" && (
+                    <div
+                      className={`absolute inset-0 pointer-events-none transition-opacity duration-500 ${
+                        studioBackdrop === "dark" ? "opacity-100" : "opacity-0"
+                      }`}
+                      style={{
+                        background:
+                          "radial-gradient(ellipse 68% 58% at 50% 50%, rgba(255, 255, 255, 0.08) 0%, rgba(212, 175, 55, 0.04) 40%, rgba(13, 14, 18, 0.85) 75%, rgba(10, 11, 14, 0.98) 100%)",
+                      }}
+                    />
+                  )}
+
+                  {/* Subtle Architectural Grid on Studio Floor */}
+                  {!arCameraActive && studioTab === "3d" && studioBackdrop === "dark" && (
+                    <div
+                      className="absolute inset-x-0 bottom-0 h-1/2 pointer-events-none opacity-20"
+                      style={{
+                        backgroundImage:
+                          "linear-gradient(to right, rgba(255, 255, 255, 0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.06) 1px, transparent 1px)",
+                        backgroundSize: "36px 36px",
+                        transform: "perspective(400px) rotateX(65deg)",
+                        transformOrigin: "bottom center",
+                        maskImage: "linear-gradient(to top, rgba(0,0,0,1) 0%, transparent 85%)",
+                        WebkitMaskImage: "linear-gradient(to top, rgba(0,0,0,1) 0%, transparent 85%)",
+                      }}
+                    />
+                  )}
+
                   {/* ThreeJS Container */}
                   <div
                     ref={canvasRef}
                     className={`absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing ${
-                      studioTab === "3d" || arCameraActive ? "z-10 opacity-100 pointer-events-auto" : "z-0 opacity-0 pointer-events-none"
+                      studioTab === "3d" || studioTab === "ar" ? "z-10 opacity-100 pointer-events-auto" : "z-0 opacity-0 pointer-events-none"
                     }`}
                   />
 
-                  {/* Live Camera Feed if Camera AR is active */}
-                  {arCameraActive && (
+                  {/* Live Camera Feed for AR View */}
+                  {studioTab === "ar" && (
                     <video
                       ref={videoRef}
                       autoPlay
@@ -1375,18 +1878,26 @@ export default function ProductDetailPage() {
                       disablePictureInPicture
                       disableRemotePlayback
                       controlsList="nodownload noplaybackrate nofullscreen noremoteplayback"
-                      className="absolute inset-0 w-full h-full object-cover z-0 pointer-events-none"
+                      className={`absolute inset-0 w-full h-full object-cover z-0 pointer-events-none transition-opacity duration-300 ${
+                        mediaStreamRef.current ? "opacity-100" : "opacity-0"
+                      }`}
                     />
                   )}
 
                   {/* Loading Indicator for 3D model */}
                   {isModelLoading && (studioTab === "3d" || arCameraActive) && (
-                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-warm-ivory/85 backdrop-blur-sm pointer-events-none transition-opacity duration-300">
-                      <div className="w-10 h-10 border-2 border-charcoal-ink/20 border-t-charcoal-ink rounded-full animate-spin mb-3" />
-                      <p className="font-display text-xs uppercase tracking-widest text-charcoal-ink font-semibold">
+                    <div className={`absolute inset-0 z-40 flex flex-col items-center justify-center backdrop-blur-sm pointer-events-none transition-opacity duration-300 ${
+                      studioBackdrop === "dark" ? "bg-[#101114]/90 text-white" : "bg-warm-ivory/85 text-charcoal-ink"
+                    }`}>
+                      <div className={`w-10 h-10 border-2 rounded-full animate-spin mb-3 ${
+                        studioBackdrop === "dark" ? "border-white/20 border-t-white" : "border-charcoal-ink/20 border-t-charcoal-ink"
+                      }`} />
+                      <p className="font-display text-xs uppercase tracking-widest font-semibold">
                         Loading 3D Model {loadProgress > 0 ? `(${loadProgress}%)` : ""}
                       </p>
-                      <p className="font-sans text-[11px] text-stone-500 mt-1">
+                      <p className={`font-sans text-[11px] mt-1 ${
+                        studioBackdrop === "dark" ? "text-stone-400" : "text-stone-500"
+                      }`}>
                         Preparing luxury 3D upholstery...
                       </p>
                     </div>
@@ -1397,64 +1908,147 @@ export default function ProductDetailPage() {
                     <>
                       {hasConfig3D && activeModelUrl ? (
                         <>
-                          {/* Controls Hint & Reset View */}
-                          <div className="absolute top-3 left-3 right-3 z-20 pointer-events-none flex items-center justify-between">
-                            <span className="bg-white/90 backdrop-blur-sm border border-stainless-silver px-3 py-1 text-[11px] font-sans rounded-sm shadow-sm text-stone-700">
+                          {/* Controls Hint, Studio Stage Toggle & Reset View */}
+                          <div className="absolute top-3 left-3 right-3 z-30 pointer-events-none flex items-center justify-between gap-2">
+                            <span className={`px-3 py-1 text-[11px] font-sans rounded-sm shadow-sm backdrop-blur-md border ${
+                              studioBackdrop === "dark"
+                                ? "bg-black/60 text-white/90 border-white/15"
+                                : "bg-white/90 text-stone-700 border-stainless-silver"
+                            }`}>
                               Drag to rotate • Scroll to zoom
                             </span>
-                            <button
-                              type="button"
-                              onClick={resetCameraView}
-                              className="pointer-events-auto bg-white/90 hover:bg-white backdrop-blur-sm border border-stainless-silver px-2.5 py-1 text-[11px] font-sans font-semibold rounded-sm shadow-sm text-charcoal-ink transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 hover:border-charcoal-ink"
-                              title="Reset camera view to center model"
+
+                            <div
+                              className="flex items-center gap-1.5 pointer-events-auto"
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
+                              style={{ touchAction: "manipulation" }}
                             >
-                              <RotateCcw className="h-3 w-3" />
-                              <span>Reset View</span>
-                            </button>
+                              {/* Studio Lighting Stage Toggle */}
+                              <button
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onTouchStart={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setStudioBackdrop((prev) => (prev === "dark" ? "light" : "dark"));
+                                }}
+                                className={`px-2.5 py-1 text-[11px] font-sans font-semibold rounded-sm shadow-sm transition-all cursor-pointer flex items-center gap-1.5 backdrop-blur-md border ${
+                                  studioBackdrop === "dark"
+                                    ? "bg-black/60 hover:bg-black/80 text-white/90 border-white/20 hover:border-white/40"
+                                    : "bg-white/90 hover:bg-white text-charcoal-ink border-stainless-silver hover:border-charcoal-ink"
+                                }`}
+                                title={`Switch to ${studioBackdrop === "dark" ? "Light Gallery" : "Dark Showroom"} backdrop`}
+                              >
+                                <span>{studioBackdrop === "dark" ? "🌙 Dark Stage" : "☀️ Light Stage"}</span>
+                              </button>
+
+                              {/* Reset Camera View */}
+                              <button
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onTouchStart={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  resetCameraView();
+                                }}
+                                className={`px-2.5 py-1 text-[11px] font-sans font-semibold rounded-sm shadow-sm transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 backdrop-blur-md border ${
+                                  studioBackdrop === "dark"
+                                    ? "bg-black/60 hover:bg-black/80 text-white border-white/20 hover:border-white/40"
+                                    : "bg-white/90 hover:bg-white text-charcoal-ink border-stainless-silver hover:border-charcoal-ink"
+                                }`}
+                                title="Reset camera view to center model"
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                                <span>Reset View</span>
+                              </button>
+                            </div>
                           </div>
 
                           {/* Active Selection Pill & Quick Model Shift */}
-                          <div className="absolute bottom-3 left-3 right-3 z-20 pointer-events-none flex flex-wrap items-center justify-between gap-2">
-                            <div className="bg-white/95 backdrop-blur-sm border border-stainless-silver px-3 py-1.5 rounded-sm shadow-md flex items-center gap-2 pointer-events-auto">
+                          <div className="absolute bottom-3 left-3 right-3 z-30 pointer-events-none flex flex-wrap items-center justify-between gap-2">
+                            <div
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
+                              style={{ touchAction: "manipulation" }}
+                              className={`backdrop-blur-md border px-3 py-1.5 rounded-sm shadow-md flex items-center gap-2 pointer-events-auto ${
+                                studioBackdrop === "dark"
+                                  ? "bg-black/75 text-white border-white/20"
+                                  : "bg-white/95 text-charcoal-ink border-stainless-silver"
+                              }`}
+                            >
+                              {!isTable ? (
+                                <>
+                                  <span
+                                    className="w-3 h-3 rounded-full border border-black/25 shrink-0 shadow-inner"
+                                    style={{ backgroundColor: selectedFabricObj.hex }}
+                                  />
+                                  <span className="text-[11px] font-sans font-semibold">
+                                    {selectedFabric}
+                                  </span>
+                                  <span className={studioBackdrop === "dark" ? "text-white/30" : "text-stone-300"}>|</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="w-3 h-3 rounded-full border border-black/25 shrink-0 shadow-inner bg-stone-100" />
+                                  <span className="text-[11px] font-sans font-semibold">
+                                    Polished Marble Top
+                                  </span>
+                                  <span className={studioBackdrop === "dark" ? "text-white/30" : "text-stone-300"}>|</span>
+                                </>
+                              )}
                               <span
-                                className="w-3 h-3 rounded-full border border-black/15 shrink-0 shadow-inner"
-                                style={{ backgroundColor: selectedFabricObj.hex }}
-                              />
-                              <span className="text-[11px] font-sans text-charcoal-ink font-semibold">
-                                {selectedFabric}
-                              </span>
-                              <span className="text-stone-300">|</span>
-                              <span
-                                className="w-3 h-3 rounded-full border border-black/15 shrink-0 shadow-inner"
+                                className="w-3 h-3 rounded-full border border-black/25 shrink-0 shadow-inner"
                                 style={{ backgroundColor: selectedSteelObj.hex }}
                               />
-                              <span className="text-[11px] font-sans text-stone-700 font-semibold">
+                              <span className={`text-[11px] font-sans font-semibold ${studioBackdrop === "dark" ? "text-stone-200" : "text-stone-700"}`}>
                                 {selectedSteel} Base
                               </span>
                             </div>
 
-                            {/* Quick Model Shift Pill in 3D */}
-                            <div className="bg-white/95 backdrop-blur-sm border border-stainless-silver px-2.5 py-1 rounded-sm shadow-md flex items-center gap-1.5 pointer-events-auto text-[11px] font-sans font-semibold text-charcoal-ink">
-                              <button
-                                type="button"
-                                onClick={() => handleShiftModel("prev")}
-                                className="hover:text-stone-500 cursor-pointer p-0.5"
-                                title="Previous Model"
-                                aria-label="Previous model"
+                            {!isTable && (
+                              /* Quick Model Shift Pill in 3D */
+                              <div
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onTouchStart={(e) => e.stopPropagation()}
+                                style={{ touchAction: "manipulation" }}
+                                className={`backdrop-blur-md border px-2.5 py-1 rounded-sm shadow-md flex items-center gap-1.5 pointer-events-auto text-[11px] font-sans font-semibold ${
+                                  studioBackdrop === "dark"
+                                    ? "bg-black/75 text-white border-white/20"
+                                    : "bg-white/95 text-charcoal-ink border-stainless-silver"
+                                }`}
                               >
-                                <ChevronLeft className="h-3.5 w-3.5" />
-                              </button>
-                              <span className="text-[11px] font-bold">{selectedConfig}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleShiftModel("next")}
-                                className="hover:text-stone-500 cursor-pointer p-0.5"
-                                title="Next Model"
-                                aria-label="Next model"
-                              >
-                                <ChevronRight className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
+                                <button
+                                  type="button"
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onTouchStart={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleShiftModel("prev");
+                                  }}
+                                  className="hover:text-stone-400 cursor-pointer p-0.5 active:scale-90"
+                                  title="Previous Model"
+                                  aria-label="Previous model"
+                                >
+                                  <ChevronLeft className="h-3.5 w-3.5" />
+                                </button>
+                                <span className="text-[11px] font-bold px-1">{selectedConfig}</span>
+                                <button
+                                  type="button"
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onTouchStart={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleShiftModel("next");
+                                  }}
+                                  className="hover:text-stone-400 cursor-pointer p-0.5 active:scale-90"
+                                  title="Next Model"
+                                  aria-label="Next model"
+                                >
+                                  <ChevronRight className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </>
                       ) : (
@@ -1485,68 +2079,80 @@ export default function ProductDetailPage() {
 
                   {/* 2D Sketch Tab Viewport */}
                   {studioTab === "sketch" && (
-                    <div className="absolute inset-0 z-20 flex flex-col justify-between p-3 sm:p-5 bg-white/95 backdrop-blur-xs select-none">
+                    <div className="absolute inset-0 z-20 flex flex-col justify-between p-2 sm:p-5 bg-white/95 backdrop-blur-xs select-none">
                       {/* Top Bar: Title & Dimensions */}
-                      <div className="flex flex-wrap items-center justify-between gap-2 z-20">
-                        <div className="flex items-center gap-2">
-                          <span className="flex items-center gap-1.5 bg-stone-100 border border-stainless-silver px-2.5 py-1 rounded-sm text-xs font-sans font-bold text-charcoal-ink shadow-2xs">
-                            <Ruler className="h-3.5 w-3.5 text-charcoal-ink" />
-                            <span className="uppercase tracking-wider">
-                              {currentConfig.schematicTitle || `${selectedConfig} 2D Sketch`}
+                      <div className="flex items-center justify-between gap-2 z-20 px-1 sm:px-0">
+                        <div className="flex items-center gap-1.5 sm:gap-2">
+                          <span className="flex items-center gap-1 sm:gap-1.5 bg-stone-100 border border-stainless-silver px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-sm text-[10px] sm:text-xs font-sans font-bold text-charcoal-ink shadow-2xs">
+                            <Ruler className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-charcoal-ink shrink-0" />
+                            <span className="uppercase tracking-wider truncate max-w-[170px] sm:max-w-none">
+                              {isTable ? `${product.name} Technical Schematic` : (currentConfig.schematicTitle || `${selectedConfig} 2D Sketch`)}
                             </span>
                           </span>
                         </div>
 
-                        <div className="bg-white/90 border border-stainless-silver px-2.5 py-1 rounded-sm text-[11px] font-sans text-stone-600 shadow-2xs">
-                          <span>Overall: <strong className="text-charcoal-ink">{currentConfig.dimensions.overall}</strong></span>
+                        <div className="bg-white/90 border border-stainless-silver px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-sm text-[10px] sm:text-[11px] font-sans text-stone-600 shadow-2xs shrink-0">
+                          <span>Overall: <strong className="text-charcoal-ink">{product.dimensions?.overall || currentConfig.dimensions.overall}</strong></span>
                         </div>
                       </div>
 
-                      {/* Center Sketch Image Display with Left/Right Shift Buttons */}
-                      <div className="relative flex-1 w-full flex items-center justify-center min-h-0 my-2 group/sketch">
-                        {/* Previous Model Shift Button */}
-                        <button
-                          type="button"
-                          onClick={() => handleShiftModel("prev")}
-                          className="absolute left-1 sm:left-3 z-30 w-8 h-8 sm:w-10 sm:h-10 bg-white/90 hover:bg-white text-charcoal-ink border border-stainless-silver rounded-full shadow-md flex items-center justify-center transition-all cursor-pointer hover:scale-105 active:scale-95 group/btn"
-                          title="Shift to Previous Seater Model"
-                          aria-label="Previous model"
-                        >
-                          <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5 transition-transform group-hover/btn:-translate-x-0.5" />
-                        </button>
+                      {/* Center Sketch Image Display - Maximized with respect to width on mobile */}
+                      <div className="relative flex-1 w-full flex items-center justify-center min-h-0 my-1 sm:my-2 group/sketch overflow-hidden px-1 sm:px-2">
+                        {!isTable && (
+                          <button
+                            type="button"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleShiftModel("prev");
+                            }}
+                            style={{ touchAction: "manipulation" }}
+                            className="absolute left-1 sm:left-3 z-30 w-7 h-7 sm:w-10 sm:h-10 bg-white/90 hover:bg-white text-charcoal-ink border border-stainless-silver rounded-full shadow-md flex items-center justify-center transition-all cursor-pointer hover:scale-105 active:scale-95 group/btn"
+                            title="Shift to Previous Seater Model"
+                            aria-label="Previous model"
+                          >
+                            <ChevronLeft className="h-3.5 w-3.5 sm:h-5 sm:w-5 transition-transform group-hover/btn:-translate-x-0.5" />
+                          </button>
+                        )}
 
-                        {/* Sketch Graphic */}
-                        <div className="w-full h-full flex items-center justify-center p-2 sm:p-4">
+                        {/* Sketch Graphic - Prioritize width expansion on mobile */}
+                        <div className="w-full h-full flex items-center justify-center px-1 py-0.5 sm:p-2">
                           <img
                             key={activeSketchUrl}
                             src={activeSketchUrl}
-                            alt={`${selectedConfig} 2D Sketch`}
-                            className="max-h-full max-w-full object-contain object-center drop-shadow-xs transition-opacity duration-300 select-none"
+                            alt={isTable ? `${product.name} Technical Schematic` : `${selectedConfig} 2D Sketch`}
+                            className="w-full h-auto max-h-full object-contain object-center drop-shadow-xs transition-opacity duration-300 select-none scale-[1.06] sm:scale-100"
                           />
                         </div>
 
-                        {/* Next Model Shift Button */}
-                        <button
-                          type="button"
-                          onClick={() => handleShiftModel("next")}
-                          className="absolute right-1 sm:right-3 z-30 w-8 h-8 sm:w-10 sm:h-10 bg-white/90 hover:bg-white text-charcoal-ink border border-stainless-silver rounded-full shadow-md flex items-center justify-center transition-all cursor-pointer hover:scale-105 active:scale-95 group/btn"
-                          title="Shift to Next Seater Model"
-                          aria-label="Next model"
-                        >
-                          <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 transition-transform group-hover/btn:translate-x-0.5" />
-                        </button>
+                        {!isTable && (
+                          <button
+                            type="button"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleShiftModel("next");
+                            }}
+                            style={{ touchAction: "manipulation" }}
+                            className="absolute right-1 sm:right-3 z-30 w-7 h-7 sm:w-10 sm:h-10 bg-white/90 hover:bg-white text-charcoal-ink border border-stainless-silver rounded-full shadow-md flex items-center justify-center transition-all cursor-pointer hover:scale-105 active:scale-95 group/btn"
+                            title="Shift to Next Seater Model"
+                            aria-label="Next model"
+                          >
+                            <ChevronRight className="h-3.5 w-3.5 sm:h-5 sm:w-5 transition-transform group-hover/btn:translate-x-0.5" />
+                          </button>
+                        )}
                       </div>
 
                       {/* Bottom: Architectural Dimensions */}
-                      <div className="w-full flex items-center justify-center z-20">
-                        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] sm:text-[11px] font-sans text-stone-500 uppercase tracking-wider bg-warm-ivory/60 px-3 py-1.5 rounded-sm border border-stainless-silver/60">
-                          <span>Overall: <strong className="text-charcoal-ink">{currentConfig.dimensions.overall}</strong></span>
+                      <div className="w-full flex items-center justify-center z-20 pb-0.5 sm:pb-0">
+                        <div className="flex flex-wrap items-center justify-center gap-x-2 sm:gap-x-3 gap-y-0.5 text-[9px] sm:text-[11px] font-sans text-stone-500 uppercase tracking-wider bg-warm-ivory/80 px-2 sm:px-3 py-1 rounded-sm border border-stainless-silver/60">
+                          <span>Overall: <strong className="text-charcoal-ink">{product.dimensions?.overall || currentConfig.dimensions.overall}</strong></span>
                           <span>•</span>
-                          <span>Seat Depth: <strong className="text-charcoal-ink">{currentConfig.dimensions.seatDepth}</strong></span>
+                          <span>Clearance: <strong className="text-charcoal-ink">{product.dimensions?.clearance || currentConfig.dimensions.clearance}</strong></span>
                           <span>•</span>
-                          <span>Seat Height: <strong className="text-charcoal-ink">{currentConfig.dimensions.seatHeight}</strong></span>
-                          <span>•</span>
-                          <span>Base Clearance: <strong className="text-charcoal-ink">{currentConfig.dimensions.clearance}</strong></span>
+                          <span>Height: <strong className="text-charcoal-ink">{product.dimensions?.seatHeight || currentConfig.dimensions.seatHeight}</strong></span>
                         </div>
                       </div>
                     </div>
@@ -1555,16 +2161,16 @@ export default function ProductDetailPage() {
                   {/* AR Tab Content */}
                   {studioTab === "ar" && (
                     <div
-                      className={`absolute inset-0 z-20 flex flex-col justify-between ${
+                      className={`absolute inset-0 z-30 flex flex-col justify-between ${
                         arCameraActive
                           ? "bg-transparent pointer-events-none p-3 sm:p-4"
-                          : "items-center justify-center p-6 bg-warm-ivory/95 overflow-y-auto pointer-events-auto"
+                          : "items-center justify-center p-6 bg-black/40 backdrop-blur-xs overflow-y-auto pointer-events-auto"
                       }`}
                     >
                       {arCameraActive ? (
                         <>
                           {/* Top Controls Overlay */}
-                          <div className="w-full flex items-center justify-between gap-2 pointer-events-none">
+                          <div className="w-full flex items-center justify-between gap-2 pointer-events-none z-30">
                             <div className="bg-black/60 backdrop-blur-md text-white border border-white/10 px-3 py-1 text-xs font-sans rounded-sm shadow-md flex items-center gap-2 pointer-events-auto">
                               <span
                                 className="w-2.5 h-2.5 rounded-full border border-white/30 shrink-0"
@@ -1575,28 +2181,40 @@ export default function ProductDetailPage() {
                               <span className="text-white/80 text-[11px]">{selectedSteel}</span>
                             </div>
 
-                            <div className="flex items-center gap-2 pointer-events-auto">
+                            <div className="flex items-center gap-2 pointer-events-auto" style={{ touchAction: "manipulation" }}>
                               <span className="bg-emerald-700/90 backdrop-blur-xs text-white border border-emerald-600 px-3 py-1 text-xs font-sans rounded-sm shadow-md flex items-center gap-1.5 font-medium">
                                 <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                                 Live Camera AR Active
                               </span>
                               <button
-                                onClick={stopCameraAR}
+                                type="button"
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onTouchStart={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  stopCameraAR();
+                                }}
                                 className="bg-white/95 hover:bg-white text-charcoal-ink border border-stainless-silver px-3 py-1 text-xs font-sans rounded-sm shadow-md transition-colors cursor-pointer font-semibold active:scale-95"
                               >
-                                Exit Camera AR
+                                Exit AR
                               </button>
                             </div>
                           </div>
 
                           {/* Bottom Controls Overlay */}
-                          <div className="w-full flex items-center justify-between gap-2 pointer-events-none">
+                          <div className="w-full flex items-center justify-between gap-2 pointer-events-none z-30">
                             <span className="bg-black/60 backdrop-blur-md text-white px-3 py-1 text-[11px] font-sans rounded-sm shadow-md pointer-events-auto">
-                              Drag to rotate & position • Scroll to zoom
+                              Drag to rotate & position • Pinch to scale
                             </span>
                             <button
                               type="button"
-                              onClick={resetCameraView}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                resetCameraView();
+                              }}
+                              style={{ touchAction: "manipulation" }}
                               className="pointer-events-auto bg-white/95 hover:bg-white backdrop-blur-sm border border-stainless-silver px-2.5 py-1 text-[11px] font-sans font-semibold rounded-sm shadow-md text-charcoal-ink transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
                               title="Reset view"
                             >
@@ -1606,72 +2224,36 @@ export default function ProductDetailPage() {
                           </div>
                         </>
                       ) : (
-                        <div className="max-w-md w-full flex flex-col items-center text-center animate-fadeIn">
-                          <div className="w-11 h-11 rounded-full bg-charcoal-ink text-white flex items-center justify-center mb-2.5">
-                            <Scan className="w-5 h-5" />
+                        <div className="max-w-md w-full flex flex-col items-center text-center animate-fadeIn z-30" style={{ touchAction: "manipulation" }}>
+                          <div className="w-12 h-12 rounded-full bg-white text-charcoal-ink flex items-center justify-center mb-2.5 shadow-lg">
+                            <Camera className="w-6 h-6 text-charcoal-ink" />
                           </div>
-                          <h4 className="font-display text-base font-bold text-charcoal-ink tracking-tight uppercase mb-1">
-                            Augmented Reality View
+                          <h4 className="font-display text-base sm:text-lg font-bold text-white tracking-tight uppercase mb-1 drop-shadow-md">
+                            Live Camera AR View
                           </h4>
-                          <p className="font-sans text-xs text-stone-500 mb-4 max-w-sm">
-                            Place the {product.name} ({selectedFabric} & {selectedSteel} Base) in your room at true 1:1 scale
+                          <p className="font-sans text-xs text-white/90 mb-4 max-w-sm drop-shadow">
+                            Place the {product.name} ({selectedFabric} & {selectedSteel} Base) in your room through your device camera
                           </p>
 
-                          {isAndroidDevice ? (
-                            <div className="w-full space-y-2">
-                              <button
-                                onClick={handleOpenSceneViewer}
-                                className="w-full py-3 px-4 bg-emerald-800 hover:bg-emerald-900 text-white font-sans text-xs font-semibold rounded-sm transition-colors flex items-center justify-center gap-2 shadow-sm uppercase tracking-wider cursor-pointer"
-                              >
-                                <Sparkles className="w-4 h-4" />
-                                <span>Launch Google Scene Viewer (Native AR)</span>
-                              </button>
-                              <button
-                                onClick={startCameraAR}
-                                className="w-full py-2.5 px-4 bg-white border border-stainless-silver hover:bg-stone-100 text-charcoal-ink font-sans text-xs font-semibold rounded-sm transition-colors flex items-center justify-center gap-2 shadow-xs cursor-pointer"
-                              >
-                                <Camera className="w-4 h-4" />
-                                <span>Start In-Browser Camera AR</span>
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex flex-col sm:flex-row items-center gap-4 bg-white p-4 border border-stainless-silver rounded-sm shadow-sm w-full">
-                              <div className="relative w-28 h-28 shrink-0 bg-white border border-stone-200 p-1 rounded-sm flex items-center justify-center">
-                                <img
-                                  src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(getArUrl())}`}
-                                  alt="AR QR Code"
-                                  className="w-full h-full object-contain"
-                                />
-                              </div>
-                              <div className="flex flex-col text-left space-y-2 flex-1">
-                                <span className="text-[11px] font-sans font-bold uppercase tracking-wider text-charcoal-ink">
-                                  📱 Scan with your smartphone
-                                </span>
-                                <p className="text-[11px] font-sans text-stone-500 leading-snug">
-                                  Open your phone camera to view in native ARCore / Scene Viewer directly on your floor.
-                                </p>
-                                <div className="flex flex-wrap gap-2 pt-1">
-                                  <button
-                                    onClick={startCameraAR}
-                                    className="py-1.5 px-3 bg-charcoal-ink hover:bg-stone-800 text-white text-[11px] font-sans font-semibold rounded-sm transition-colors flex items-center gap-1.5 cursor-pointer"
-                                  >
-                                    <Camera className="w-3.5 h-3.5" />
-                                    <span>Live Camera AR</span>
-                                  </button>
-                                  <button
-                                    onClick={handleCopyArLink}
-                                    className="py-1.5 px-3 border border-stone-300 hover:bg-stone-50 text-charcoal-ink text-[11px] font-sans font-semibold rounded-sm transition-colors flex items-center gap-1 cursor-pointer"
-                                  >
-                                    {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                                    <span>{copiedLink ? "Copied" : "Copy Link"}</span>
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          )}
+                          <div className="w-full max-w-xs space-y-2">
+                            <button
+                              type="button"
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startCameraAR();
+                              }}
+                              style={{ touchAction: "manipulation" }}
+                              className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-sans text-xs font-bold rounded-sm transition-all flex items-center justify-center gap-2 shadow-lg uppercase tracking-wider cursor-pointer active:scale-98"
+                            >
+                              <Camera className="w-4 h-4" />
+                              <span>Open in Browser AR</span>
+                            </button>
+                          </div>
 
                           {arCameraError && (
-                            <p className="font-sans text-[11px] text-amber-800 bg-amber-50 border border-amber-200 p-2 rounded-sm mt-3">
+                            <p className="font-sans text-[11px] text-amber-200 bg-black/60 border border-amber-300/40 p-2 rounded-sm mt-3 max-w-xs">
                               ⚠️ {arCameraError}
                             </p>
                           )}
@@ -1685,22 +2267,69 @@ export default function ProductDetailPage() {
               {/* Right: Seater, Fabric and Steel Finish Sections (Unified into One Clean Customizer Section) */}
               <div className="lg:col-span-5 w-full min-w-0">
                 <div className="bg-surface border border-stainless-silver rounded-sm shadow-2xs overflow-hidden divide-y divide-stainless-silver w-full min-w-0">
-                  {/* Seater Configuration Section */}
-                  <div className="p-3 sm:p-4">
-                    <div className="flex justify-between items-center pb-2.5 sm:pb-3 border-b border-stainless-silver/60 mb-3">
-                      <span className="font-sans text-xs tracking-wider uppercase text-on-surface-variant font-bold">
-                        Seater: <strong className="text-charcoal-ink ml-1">{selectedConfig}</strong>
-                      </span>
-                      <span className="text-[10px] font-sans text-stone-500 uppercase tracking-wider font-semibold">
-                        {SOFA_SUBSECTIONS.length} Available
-                      </span>
-                    </div>
+                  {/* Seater Configuration Section (Sofas Only) */}
+                  {!isTable && (
+                    <div className="p-3 sm:p-4">
+                      <div className="flex justify-between items-center pb-2.5 sm:pb-3 border-b border-stainless-silver/60 mb-3">
+                        <span className="font-sans text-xs tracking-wider uppercase text-on-surface-variant font-bold">
+                          Seater: <strong className="text-charcoal-ink ml-1">{selectedConfig}</strong>
+                        </span>
+                        <span className="text-[10px] font-sans text-stone-500 uppercase tracking-wider font-semibold">
+                          {SOFA_SUBSECTIONS.length} Available
+                        </span>
+                      </div>
 
-                    {/* Mobile: 2 Lines Only (Line 1: 3 buttons, Line 2: 2 buttons) */}
-                    <div className="flex flex-col gap-1.5 lg:hidden">
-                      {/* Line 1: Single Seater, Double Seater, Three Seater */}
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {SOFA_SUBSECTIONS.slice(0, 3).map((sub) => {
+                      {/* Mobile: 2 Lines Only (Line 1: 3 buttons, Line 2: 2 buttons) */}
+                      <div className="flex flex-col gap-1.5 lg:hidden">
+                        {/* Line 1: Single Seater, Double Seater, Three Seater */}
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {SOFA_SUBSECTIONS.slice(0, 3).map((sub) => {
+                            const isSelected =
+                              selectedConfig.toLowerCase() === sub.name.toLowerCase() ||
+                              selectedConfig.toLowerCase() === sub.id.toLowerCase();
+                            return (
+                              <button
+                                key={sub.id}
+                                type="button"
+                                onClick={() => handleSelectConfig(sub.name)}
+                                className={`py-2 px-1 text-[11px] font-sans rounded-sm border transition-all text-center cursor-pointer ${
+                                  isSelected
+                                    ? "bg-charcoal-ink text-white font-bold border-charcoal-ink shadow-xs"
+                                    : "bg-white hover:bg-stone-100 text-charcoal-ink border-stainless-silver font-medium"
+                                }`}
+                              >
+                                <span className="block font-semibold truncate">{sub.name}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {/* Line 2: L-Shaped, U-Shaped */}
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {SOFA_SUBSECTIONS.slice(3, 5).map((sub) => {
+                            const isSelected =
+                              selectedConfig.toLowerCase() === sub.name.toLowerCase() ||
+                              selectedConfig.toLowerCase() === sub.id.toLowerCase();
+                            return (
+                              <button
+                                key={sub.id}
+                                type="button"
+                                onClick={() => handleSelectConfig(sub.name)}
+                                className={`py-2 px-1 text-[11px] font-sans rounded-sm border transition-all text-center cursor-pointer ${
+                                  isSelected
+                                    ? "bg-charcoal-ink text-white font-bold border-charcoal-ink shadow-xs"
+                                    : "bg-white hover:bg-stone-100 text-charcoal-ink border-stainless-silver font-medium"
+                                }`}
+                              >
+                                <span className="block font-semibold truncate">{sub.name}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Desktop: Standard Grid */}
+                      <div className="hidden lg:grid grid-cols-3 gap-2">
+                        {SOFA_SUBSECTIONS.map((sub) => {
                           const isSelected =
                             selectedConfig.toLowerCase() === sub.name.toLowerCase() ||
                             selectedConfig.toLowerCase() === sub.id.toLowerCase();
@@ -1709,176 +2338,162 @@ export default function ProductDetailPage() {
                               key={sub.id}
                               type="button"
                               onClick={() => handleSelectConfig(sub.name)}
-                              className={`py-2 px-1 text-[11px] font-sans rounded-sm border transition-all text-center cursor-pointer ${
+                              className={`py-2 px-2.5 text-xs font-sans rounded-sm border transition-all text-center cursor-pointer ${
                                 isSelected
                                   ? "bg-charcoal-ink text-white font-bold border-charcoal-ink shadow-xs"
                                   : "bg-white hover:bg-stone-100 text-charcoal-ink border-stainless-silver font-medium"
                               }`}
                             >
-                              <span className="block font-semibold truncate">{sub.name}</span>
+                              <span className="block font-semibold">{sub.name}</span>
                             </button>
                           );
                         })}
                       </div>
-                      {/* Line 2: L-Shaped, U-Shaped */}
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {SOFA_SUBSECTIONS.slice(3, 5).map((sub) => {
-                          const isSelected =
-                            selectedConfig.toLowerCase() === sub.name.toLowerCase() ||
-                            selectedConfig.toLowerCase() === sub.id.toLowerCase();
+                    </div>
+                  )}
+
+                  {/* Fabric Swatch Section (Sofas Only) */}
+                  {!isTable && (
+                    <div className="p-3 sm:p-4">
+                      <div className="flex justify-between items-center pb-2.5 sm:pb-3 border-b border-stainless-silver/60 mb-3">
+                        <span className="font-sans text-xs tracking-wider uppercase text-on-surface-variant font-bold">
+                          Fabric: <strong className="text-charcoal-ink ml-1">{selectedFabric}</strong>
+                        </span>
+                        <span className="text-[10px] font-sans text-stone-500 uppercase tracking-wider font-semibold">
+                          {FABRIC_SWATCHES.length} Options
+                        </span>
+                      </div>
+
+                      {/* Mobile: 5 swatches in a row, right scrollable */}
+                      <div className="flex lg:hidden overflow-x-auto gap-1.5 pb-2 scrollbar-thin snap-x snap-mandatory">
+                        {FABRIC_SWATCHES.map((fab) => {
+                          const isSelected = selectedFabric === fab.name;
                           return (
                             <button
-                              key={sub.id}
+                              key={fab.name}
                               type="button"
-                              onClick={() => handleSelectConfig(sub.name)}
-                              className={`py-2 px-1 text-[11px] font-sans rounded-sm border transition-all text-center cursor-pointer ${
-                                isSelected
-                                  ? "bg-charcoal-ink text-white font-bold border-charcoal-ink shadow-xs"
-                                  : "bg-white hover:bg-stone-100 text-charcoal-ink border-stainless-silver font-medium"
+                              onClick={() => {
+                                setSelectedFabric(fab.name);
+                                const idx = displayImages.indexOf(fab.image);
+                                if (idx !== -1) setActiveImageIdx(idx);
+                              }}
+                              className={`w-[calc((100%-24px)/5)] shrink-0 snap-start group relative text-left border rounded-sm overflow-hidden bg-white hover:border-charcoal-ink transition-all cursor-pointer ${
+                                isSelected ? "border-charcoal-ink shadow-sm ring-1 ring-charcoal-ink" : "border-stainless-silver"
                               }`}
                             >
-                              <span className="block font-semibold truncate">{sub.name}</span>
+                              <div className="relative aspect-square w-full bg-stone-100">
+                                <img
+                                  src={fab.image}
+                                  alt={fab.name}
+                                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                />
+                                
+                                {/* Checkbox Overlay in bottom-left */}
+                                <div className="absolute bottom-1 left-1 z-10 flex items-center justify-center">
+                                  {isSelected ? (
+                                    <div className="w-3 h-3 bg-charcoal-ink border border-white text-white flex items-center justify-center rounded-sm shadow-xs">
+                                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-2 h-2">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                      </svg>
+                                    </div>
+                                  ) : (
+                                    <div className="w-3 h-3 border border-white bg-black/25 rounded-sm" />
+                                  )}
+                                </div>
+                              </div>
+                              <div className="p-1 border-t border-stone-100">
+                                <p className="font-sans text-[7.5px] xs:text-[8px] uppercase font-bold text-charcoal-ink truncate leading-tight text-center">
+                                  {fab.name}
+                                </p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Desktop: 6 cols grid */}
+                      <div className="hidden lg:grid grid-cols-3 sm:grid-cols-6 gap-2 sm:gap-2.5">
+                        {FABRIC_SWATCHES.map((fab) => {
+                          const isSelected = selectedFabric === fab.name;
+                          return (
+                            <button
+                              key={fab.name}
+                              type="button"
+                              onClick={() => {
+                                setSelectedFabric(fab.name);
+                                const idx = displayImages.indexOf(fab.image);
+                                if (idx !== -1) setActiveImageIdx(idx);
+                              }}
+                              className={`group relative text-left border rounded-sm overflow-hidden bg-white hover:border-charcoal-ink transition-all cursor-pointer ${
+                                isSelected ? "border-charcoal-ink shadow-sm ring-1 ring-charcoal-ink" : "border-stainless-silver"
+                              }`}
+                            >
+                              <div className="relative aspect-square w-full bg-stone-100">
+                                <img
+                                  src={fab.image}
+                                  alt={fab.name}
+                                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                />
+                                
+                                {/* Checkbox Overlay in bottom-left */}
+                                <div className="absolute bottom-1.5 left-1.5 z-10 flex items-center justify-center">
+                                  {isSelected ? (
+                                    <div className="w-4 h-4 bg-charcoal-ink border border-white text-white flex items-center justify-center rounded-sm shadow-xs">
+                                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-3 h-3">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                      </svg>
+                                    </div>
+                                  ) : (
+                                    <div className="w-4 h-4 border border-white bg-black/25 rounded-sm" />
+                                  )}
+                                </div>
+                              </div>
+                              <div className="p-1.5 sm:p-2 border-t border-stone-100">
+                                <p className="font-sans text-[9px] sm:text-[10px] uppercase font-bold text-charcoal-ink truncate leading-tight text-center sm:text-left">
+                                  {fab.name}
+                                </p>
+                              </div>
                             </button>
                           );
                         })}
                       </div>
                     </div>
+                  )}
 
-                    {/* Desktop: Standard Grid */}
-                    <div className="hidden lg:grid grid-cols-3 gap-2">
-                      {SOFA_SUBSECTIONS.map((sub) => {
-                        const isSelected =
-                          selectedConfig.toLowerCase() === sub.name.toLowerCase() ||
-                          selectedConfig.toLowerCase() === sub.id.toLowerCase();
-                        return (
-                          <button
-                            key={sub.id}
-                            type="button"
-                            onClick={() => handleSelectConfig(sub.name)}
-                            className={`py-2 px-2.5 text-xs font-sans rounded-sm border transition-all text-center cursor-pointer ${
-                              isSelected
-                                ? "bg-charcoal-ink text-white font-bold border-charcoal-ink shadow-xs"
-                                : "bg-white hover:bg-stone-100 text-charcoal-ink border-stainless-silver font-medium"
-                            }`}
-                          >
-                            <span className="block font-semibold">{sub.name}</span>
-                          </button>
-                        );
-                      })}
+                  {/* Table Material & Architecture Specification (Tables Only) */}
+                  {isTable && (
+                    <div className="p-3 sm:p-4 bg-stone-50/50">
+                      <div className="flex justify-between items-center pb-2.5 sm:pb-3 border-b border-stainless-silver/60 mb-3">
+                        <span className="font-sans text-xs tracking-wider uppercase text-on-surface-variant font-bold">
+                          Tabletop & Stone Craft
+                        </span>
+                        <span className="text-[10px] font-sans text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-xs uppercase tracking-wider font-bold">
+                          Fixed Stone Top
+                        </span>
+                      </div>
+                      <div className="p-3 bg-white border border-stainless-silver rounded-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-sm bg-stone-100 border border-stone-300 shrink-0 overflow-hidden shadow-inner flex items-center justify-center">
+                            <span className="text-[10px] font-serif font-black tracking-widest text-stone-500">STONE</span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-sans font-bold text-charcoal-ink truncate">
+                              Luxe Italian Natural Marble / Stone Top
+                            </p>
+                            <p className="text-[11px] font-sans text-stone-500 truncate">
+                              {product.dimensions?.overall || "Standard Architectural Size"} • Sealed & Polished
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-
-                  {/* Fabric Swatch Section */}
-                  <div className="p-3 sm:p-4">
-                    <div className="flex justify-between items-center pb-2.5 sm:pb-3 border-b border-stainless-silver/60 mb-3">
-                      <span className="font-sans text-xs tracking-wider uppercase text-on-surface-variant font-bold">
-                        Fabric: <strong className="text-charcoal-ink ml-1">{selectedFabric}</strong>
-                      </span>
-                      <span className="text-[10px] font-sans text-stone-500 uppercase tracking-wider font-semibold">
-                        {FABRIC_SWATCHES.length} Options
-                      </span>
-                    </div>
-
-                    {/* Mobile: 5 swatches in a row, right scrollable */}
-                    <div className="flex lg:hidden overflow-x-auto gap-1.5 pb-2 scrollbar-thin snap-x snap-mandatory">
-                      {FABRIC_SWATCHES.map((fab) => {
-                        const isSelected = selectedFabric === fab.name;
-                        return (
-                          <button
-                            key={fab.name}
-                            type="button"
-                            onClick={() => {
-                              setSelectedFabric(fab.name);
-                              const idx = displayImages.indexOf(fab.image);
-                              if (idx !== -1) setActiveImageIdx(idx);
-                            }}
-                            className={`w-[calc((100%-24px)/5)] shrink-0 snap-start group relative text-left border rounded-sm overflow-hidden bg-white hover:border-charcoal-ink transition-all cursor-pointer ${
-                              isSelected ? "border-charcoal-ink shadow-sm ring-1 ring-charcoal-ink" : "border-stainless-silver"
-                            }`}
-                          >
-                            <div className="relative aspect-square w-full bg-stone-100">
-                              <img
-                                src={fab.image}
-                                alt={fab.name}
-                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                              />
-                              
-                              {/* Checkbox Overlay in bottom-left */}
-                              <div className="absolute bottom-1 left-1 z-10 flex items-center justify-center">
-                                {isSelected ? (
-                                  <div className="w-3 h-3 bg-charcoal-ink border border-white text-white flex items-center justify-center rounded-sm shadow-xs">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-2 h-2">
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                    </svg>
-                                  </div>
-                                ) : (
-                                  <div className="w-3 h-3 border border-white bg-black/25 rounded-sm" />
-                                )}
-                              </div>
-                            </div>
-                            <div className="p-1 border-t border-stone-100">
-                              <p className="font-sans text-[7.5px] xs:text-[8px] uppercase font-bold text-charcoal-ink truncate leading-tight text-center">
-                                {fab.name}
-                              </p>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Desktop: 6 cols grid */}
-                    <div className="hidden lg:grid grid-cols-3 sm:grid-cols-6 gap-2 sm:gap-2.5">
-                      {FABRIC_SWATCHES.map((fab) => {
-                        const isSelected = selectedFabric === fab.name;
-                        return (
-                          <button
-                            key={fab.name}
-                            type="button"
-                            onClick={() => {
-                              setSelectedFabric(fab.name);
-                              const idx = displayImages.indexOf(fab.image);
-                              if (idx !== -1) setActiveImageIdx(idx);
-                            }}
-                            className={`group relative text-left border rounded-sm overflow-hidden bg-white hover:border-charcoal-ink transition-all cursor-pointer ${
-                              isSelected ? "border-charcoal-ink shadow-sm ring-1 ring-charcoal-ink" : "border-stainless-silver"
-                            }`}
-                          >
-                            <div className="relative aspect-square w-full bg-stone-100">
-                              <img
-                                src={fab.image}
-                                alt={fab.name}
-                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                              />
-                              
-                              {/* Checkbox Overlay in bottom-left */}
-                              <div className="absolute bottom-1.5 left-1.5 z-10 flex items-center justify-center">
-                                {isSelected ? (
-                                  <div className="w-4 h-4 bg-charcoal-ink border border-white text-white flex items-center justify-center rounded-sm shadow-xs">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={3} stroke="currentColor" className="w-3 h-3">
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                    </svg>
-                                  </div>
-                                ) : (
-                                  <div className="w-4 h-4 border border-white bg-black/25 rounded-sm" />
-                                )}
-                              </div>
-                            </div>
-                            <div className="p-1.5 sm:p-2 border-t border-stone-100">
-                              <p className="font-sans text-[9px] sm:text-[10px] uppercase font-bold text-charcoal-ink truncate leading-tight text-center sm:text-left">
-                                {fab.name}
-                              </p>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  )}
 
                   {/* Steel / Base Finish Section */}
                   <div className="p-3 sm:p-4">
                     <div className="flex justify-between items-center pb-2.5 sm:pb-3 border-b border-stainless-silver/60 mb-3">
                       <span className="font-sans text-xs tracking-wider uppercase text-on-surface-variant font-bold">
-                        Steel / Base Finish: <strong className="text-charcoal-ink ml-1">{selectedSteel}</strong>
+                        {isTable ? "Steel Base Coverage Finish:" : "Steel / Base Finish:"} <strong className="text-charcoal-ink ml-1">{selectedSteel}</strong>
                       </span>
                       <span className="text-[10px] font-sans text-stone-500 uppercase tracking-wider font-semibold">
                         {STEEL_FINISHES.length} Options
@@ -1895,8 +2510,15 @@ export default function ProductDetailPage() {
                             type="button"
                             onClick={() => {
                               setSelectedSteel(st.name);
-                              const idx = displayImages.indexOf(st.image);
-                              if (idx !== -1) setActiveImageIdx(idx);
+                              if (isTable) {
+                                if (st.name === "Golden" && product.images[1]) setActiveImageIdx(1);
+                                else if (st.name === "Pink" && product.images[2]) setActiveImageIdx(2);
+                                else if (st.name === "Silver" && product.images[3]) setActiveImageIdx(3);
+                              } else {
+                                const idx = displayImages.indexOf(st.image);
+                                if (idx !== -1) setActiveImageIdx(idx);
+                              }
+                              applySteelFinish(st.name);
                             }}
                             className={`w-[calc((100%-24px)/5)] shrink-0 snap-start group relative text-left border rounded-sm overflow-hidden bg-white hover:border-charcoal-ink transition-all cursor-pointer ${
                               isSelected ? "border-charcoal-ink shadow-sm ring-1 ring-charcoal-ink" : "border-stainless-silver"
@@ -1942,8 +2564,15 @@ export default function ProductDetailPage() {
                             type="button"
                             onClick={() => {
                               setSelectedSteel(st.name);
-                              const idx = displayImages.indexOf(st.image);
-                              if (idx !== -1) setActiveImageIdx(idx);
+                              if (isTable) {
+                                if (st.name === "Golden" && product.images[1]) setActiveImageIdx(1);
+                                else if (st.name === "Pink" && product.images[2]) setActiveImageIdx(2);
+                                else if (st.name === "Silver" && product.images[3]) setActiveImageIdx(3);
+                              } else {
+                                const idx = displayImages.indexOf(st.image);
+                                if (idx !== -1) setActiveImageIdx(idx);
+                              }
+                              applySteelFinish(st.name);
                             }}
                             className={`group relative text-left border rounded-sm overflow-hidden bg-white hover:border-charcoal-ink transition-all cursor-pointer ${
                               isSelected ? "border-charcoal-ink shadow-sm ring-1 ring-charcoal-ink" : "border-stainless-silver"
@@ -1994,8 +2623,12 @@ export default function ProductDetailPage() {
             {product.details.map((detail, idx) => (
               <li key={idx}>{detail}</li>
             ))}
-            <li>Anti-termite treated wood core</li>
-            <li>Double stitch tailoring seams</li>
+            {!isTable && (
+              <>
+                <li>Anti-termite treated hardwood structural core</li>
+                <li>Double-stitched architectural tailoring seams</li>
+              </>
+            )}
           </ul>
         </div>
 
@@ -2220,26 +2853,6 @@ export default function ProductDetailPage() {
               </span>
             </div>
 
-            {/* Native Android AR Banner when viewed on Android phone */}
-            {isAndroidDevice && (
-              <div className="bg-emerald-50 border border-emerald-300/80 rounded-sm p-4 text-center">
-                <div className="flex items-center justify-center gap-1.5 text-xs font-display font-bold uppercase tracking-wider text-emerald-950 mb-1">
-                  <Sparkles className="w-4 h-4 text-emerald-700" />
-                  <span>Android AR Ready</span>
-                </div>
-                <p className="text-xs text-emerald-800/90 mb-3 max-w-sm mx-auto">
-                  Place the AURA 3-Seater Sofa directly onto your floor in true 1:1 scale using Google Scene Viewer.
-                </p>
-                <button
-                  onClick={handleOpenSceneViewer}
-                  className="w-full py-3 px-4 bg-emerald-800 hover:bg-emerald-900 text-white font-sans text-xs font-semibold rounded-sm transition-colors flex items-center justify-center gap-2 shadow-sm uppercase tracking-wider cursor-pointer"
-                >
-                  <Scan className="w-4 h-4" />
-                  <span>Launch Google Scene Viewer (Native AR)</span>
-                </button>
-              </div>
-            )}
-
             {/* Two Option Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Option 1: Mobile Camera Scan */}
@@ -2279,14 +2892,6 @@ export default function ProductDetailPage() {
                         <span>Copy Mobile AR Link</span>
                       </>
                     )}
-                  </button>
-
-                  <button
-                    onClick={handleOpenSceneViewer}
-                    className="w-full py-2 px-3 bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11px] font-sans font-medium rounded-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-stone-600" />
-                    <span>Android Scene Viewer</span>
                   </button>
                 </div>
               </div>

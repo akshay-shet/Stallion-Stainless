@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Montserrat, Geist } from "next/font/google";
 import "lenis/dist/lenis.css";
 import "./globals.css";
@@ -22,6 +22,13 @@ const montserrat = Montserrat({
 export const metadata: Metadata = {
   title: "Stallion Stainless | Precision Architectural Furniture",
   description: "Luxury & Precision Architectural Furniture Designs beyond Imagination. Sofa Sets, Dining Sets, Coffee & Side Tables, Chairs.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: "#0b0c0c",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

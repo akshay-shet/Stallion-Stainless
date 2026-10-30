@@ -34,8 +34,8 @@ export default function ReviewsPage() {
 
   const itemCategories = [
     { name: "Sofa", dbCategory: "sofa" },
-    { name: "Accent & Recliner", dbCategory: "accent-recliner" },
-    { name: "Coffee & Corner Table", dbCategory: "coffee-corner-table" },
+    { name: "Corner Tables", dbCategory: "corner-table" },
+    { name: "Teapoy", dbCategory: "teapoy" },
     { name: "Dining Table", dbCategory: "dining-table" },
     { name: "Partition & Console", dbCategory: "partition-console" },
     { name: "Chairs", dbCategory: "chairs" },
@@ -70,8 +70,8 @@ export default function ReviewsPage() {
   useEffect(() => {
     const matchedCategory = itemCategories.find(c => c.name === itemType)?.dbCategory || "sofa";
     const filtered = productList.filter(p => {
-      if (matchedCategory === "coffee-corner-table") return p.category === "coffee-corner-table" || p.category === "coffee-table" || p.category === "corner-table" || (p.category as string) === "table";
-      if (matchedCategory === "accent-recliner") return p.category === "accent-recliner" || p.category === "accent" || p.category === "recliner";
+      if (matchedCategory === "corner-table") return p.category === "corner-table" || (p.category as string) === "Corner tables";
+      if (matchedCategory === "teapoy") return p.category === "teapoy" || p.category === "coffee-table" || p.category === "coffee-corner-table";
       if (matchedCategory === "partition-console") return p.category === "partition-console" || p.category === "partition" || p.category === "console";
       return p.category === matchedCategory;
     });
@@ -139,11 +139,11 @@ export default function ReviewsPage() {
 
   // Helper to check category match including merged category fallbacks
   const isCategoryMatch = (pCategory: string, targetCategory: string) => {
-    if (targetCategory === "coffee-corner-table") {
-      return pCategory === "coffee-corner-table" || pCategory === "coffee-table" || pCategory === "corner-table" || (pCategory as string) === "table";
+    if (targetCategory === "corner-table") {
+      return pCategory === "corner-table" || (pCategory as string) === "Corner tables";
     }
-    if (targetCategory === "accent-recliner") {
-      return pCategory === "accent-recliner" || pCategory === "accent" || pCategory === "recliner";
+    if (targetCategory === "teapoy") {
+      return pCategory === "teapoy" || pCategory === "coffee-table" || pCategory === "coffee-corner-table";
     }
     if (targetCategory === "partition-console") {
       return pCategory === "partition-console" || pCategory === "partition" || pCategory === "console";

@@ -13,13 +13,16 @@ export default function Header() {
 
   // Detect scroll to switch between glass (on hero) and solid (scrolled)
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 60);
+    const onScroll = () => {
+      setScrolled(window.scrollY > 50);
+    };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  // On non-home pages always show solid header
+  // On non-home pages always show solid header, on /about match the studio dark theme
   const isHome = pathname === "/";
+  const isDark = pathname === "/about";
   const isGlass = isHome && !scrolled;
 
   const links = [
@@ -36,7 +39,9 @@ export default function Header() {
     <header
       className={`fixed top-0 left-0 right-0 z-50 w-full transition-all duration-500 ${
         isGlass
-          ? "bg-white/10 backdrop-blur-md border-b border-white/15 shadow-none"
+          ? "bg-transparent border-b border-transparent shadow-none"
+          : isDark
+          ? "bg-[#0e0e10]/95 backdrop-blur-md border-b border-white/10 shadow-lg"
           : "bg-white/95 backdrop-blur-md border-b border-[#d7d8d2] shadow-sm"
       }`}
     >
@@ -55,7 +60,7 @@ export default function Header() {
             </div>
             <span
               className={`text-2xl sm:text-3xl transition-colors whitespace-nowrap group-hover:opacity-80 ${
-                isGlass ? "text-white drop-shadow-sm" : "text-charcoal-ink"
+                isGlass || isDark ? "text-white drop-shadow-sm" : "text-charcoal-ink"
               }`}
               style={{ fontFamily: "'Brush Script MT', 'Brush Script M7', cursive" }}
             >
@@ -76,10 +81,10 @@ export default function Header() {
                   href={link.href}
                   className={`font-sans text-sm tracking-wider uppercase pb-1 transition-colors ${
                     isActive
-                      ? isGlass
+                      ? isGlass || isDark
                         ? "text-[#C59B27] font-bold drop-shadow-sm"
                         : "text-black font-bold"
-                      : isGlass
+                      : isGlass || isDark
                       ? "text-white/80 hover:text-white font-medium drop-shadow-sm"
                       : "text-stone-800 hover:text-black font-medium"
                   }`}
@@ -89,7 +94,7 @@ export default function Header() {
                 {isActive && (
                   <div
                     className={`absolute bottom-[-24px] left-0 w-full h-[2px] ${
-                      isGlass ? "bg-[#C59B27]" : "bg-charcoal-ink"
+                      isGlass || isDark ? "bg-[#C59B27]" : "bg-charcoal-ink"
                     }`}
                   />
                 )}
@@ -103,7 +108,7 @@ export default function Header() {
           <Link
             href="/cart"
             className={`p-1 transition-colors ${
-              isGlass ? "text-white/80 hover:text-white" : "text-charcoal-ink hover:text-primary"
+              isGlass || isDark ? "text-white/80 hover:text-white" : "text-charcoal-ink hover:text-primary"
             }`}
             aria-label="Cart"
           >
@@ -112,7 +117,7 @@ export default function Header() {
           {/* Mobile Menu Toggle */}
           <button
             className={`md:hidden p-1 transition-colors ${
-              isGlass ? "text-white/80 hover:text-white" : "text-charcoal-ink"
+              isGlass || isDark ? "text-white/80 hover:text-white" : "text-charcoal-ink"
             }`}
             onClick={() => setIsOpen(!isOpen)}
             aria-label="Toggle menu"
@@ -131,7 +136,9 @@ export default function Header() {
             onClick={() => setIsOpen(false)}
           />
           {/* Floating Nav Card */}
-          <div className="md:hidden absolute top-[calc(100%+8px)] left-3 right-3 sm:left-6 sm:right-6 z-50 bg-white rounded-2xl shadow-2xl border border-stone-300 py-4 px-3">
+          <div className={`md:hidden absolute top-[calc(100%+8px)] left-3 right-3 sm:left-6 sm:right-6 z-50 rounded-2xl shadow-2xl py-4 px-3 ${
+            isDark ? "bg-[#141418] border border-white/10 text-white" : "bg-white border border-stone-300 text-stone-900"
+          }`}>
             <nav className="flex flex-col items-center justify-center text-center gap-1.5 w-full">
               {links.map((link) => {
                 const isActive =
@@ -143,7 +150,9 @@ export default function Header() {
                     href={link.href}
                     className={`w-full max-w-[280px] py-2.5 px-4 rounded-xl text-center font-display text-xs tracking-widest uppercase transition-all duration-200 ${
                       isActive
-                        ? "bg-stone-900 text-white font-extrabold shadow-sm"
+                        ? "bg-[#C59B27] text-[#111111] font-extrabold shadow-sm"
+                        : isDark
+                        ? "text-zinc-300 hover:text-white hover:bg-white/10 font-bold"
                         : "text-stone-900 hover:text-black hover:bg-stone-100 font-bold active:bg-stone-200"
                     }`}
                     onClick={() => setIsOpen(false)}

@@ -8,7 +8,7 @@ import Footer from "@/components/Footer";
 import { useRouter } from "next/navigation";
 import Sidebar, { SOFA_SUBSECTIONS } from "@/components/Sidebar";
 import { PRODUCTS, Product, getMergedProducts } from "@/data/products";
-import { ChevronRight, Menu, SlidersHorizontal, Search, X } from "lucide-react";
+import { ChevronRight, Menu, SlidersHorizontal, Search, X, ArrowLeft } from "lucide-react";
 
 export default function CollectionsPage() {
   const router = useRouter();
@@ -24,10 +24,10 @@ export default function CollectionsPage() {
     const params = new URLSearchParams(window.location.search);
     const cat = params.get("category");
     if (cat) {
-      if (cat === "coffee-table" || cat === "corner-table") {
-        setSelectedCategory("coffee-corner-table");
-      } else if (cat === "accent" || cat === "recliner") {
-        setSelectedCategory("accent-recliner");
+      if (cat === "corner-table" || cat === "corner") {
+        setSelectedCategory("corner-table");
+      } else if (cat === "teapoy" || cat === "coffee-table" || cat === "coffee-corner-table" || cat === "coffee") {
+        setSelectedCategory("teapoy");
       } else if (cat === "partition" || cat === "console") {
         setSelectedCategory("partition-console");
       } else {
@@ -49,8 +49,8 @@ export default function CollectionsPage() {
   const categories = [
     { id: "all", name: "All Products" },
     { id: "sofa", name: "Sofa" },
-    { id: "accent-recliner", name: "Accent & Recliner" },
-    { id: "coffee-corner-table", name: "Coffee & Corner Table" },
+    { id: "corner-table", name: "Corner Tables" },
+    { id: "teapoy", name: "Teapoy" },
     { id: "dining-table", name: "Dining Table" },
     { id: "partition-console", name: "Partition & Console" },
     { id: "chairs", name: "Chairs" },
@@ -63,10 +63,10 @@ export default function CollectionsPage() {
     let result = [...productList];
 
     if (selectedCategory !== "all") {
-      if (selectedCategory === "coffee-corner-table") {
-        result = result.filter(p => p.category === "coffee-corner-table" || p.category === "coffee-table" || p.category === "corner-table" || (p.category as string) === "table");
-      } else if (selectedCategory === "accent-recliner") {
-        result = result.filter(p => p.category === "accent-recliner" || p.category === "accent" || p.category === "recliner");
+      if (selectedCategory === "corner-table") {
+        result = result.filter(p => p.category === "corner-table" || (p.category as string) === "Corner tables");
+      } else if (selectedCategory === "teapoy") {
+        result = result.filter(p => p.category === "teapoy" || p.category === "coffee-table" || p.category === "coffee-corner-table");
       } else if (selectedCategory === "partition-console") {
         result = result.filter(p => p.category === "partition-console" || p.category === "partition" || p.category === "console");
       } else {
@@ -142,16 +142,36 @@ export default function CollectionsPage() {
         {/* Right Content Area */}
         <div className="flex-1 flex flex-col min-w-0">
           <main className="flex-grow px-2 sm:px-6 md:pl-12 md:pr-20 py-3 sm:py-12 min-w-0 w-full max-w-container-max mx-auto pt-[72px] sm:pt-[88px]">
-          {/* Breadcrumbs, Menu Toggle & Search Bar in One Line on Mobile */}
-          <div className="flex items-center gap-1.5 sm:gap-4 mb-3 sm:mb-8 w-full">
+          {/* Breadcrumbs, Back Button, Menu Toggle & Search Bar */}
+          <div className="flex items-center gap-2 sm:gap-4 mb-3 sm:mb-8 w-full">
+            {/* Back Button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== "undefined" && window.history.length > 1) {
+                  router.back();
+                } else {
+                  router.push("/");
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-sm border border-stone-300 bg-white hover:bg-stone-100 hover:border-charcoal-ink text-charcoal-ink text-[11px] sm:text-xs font-sans font-semibold tracking-wider uppercase transition-all shadow-2xs group cursor-pointer shrink-0"
+              title="Go Back"
+              aria-label="Go Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
+              <span>Back</span>
+            </button>
+
             {/* Menu Toggle for Mobile Filter Drawer */}
             <button
-              className="lg:hidden flex items-center justify-center p-1.5 sm:p-2 rounded-md hover:bg-stone-200 transition-colors text-charcoal-ink shrink-0"
+              className="lg:hidden flex items-center justify-center p-1.5 sm:p-2 rounded-md hover:bg-stone-200 transition-colors text-charcoal-ink shrink-0 cursor-pointer"
               onClick={() => setSidebarOpen(!sidebarOpen)}
               aria-label="Toggle navigation"
             >
               <Menu className="h-4 w-4 sm:h-5 sm:w-5" />
             </button>
+
+            <div className="hidden lg:block h-4 w-[1px] bg-stone-300 shrink-0" />
 
             {/* Breadcrumb Path (Desktop Only) */}
             <nav aria-label="Breadcrumb" className="hidden lg:flex items-center text-[10px] sm:text-xs font-semibold tracking-wider uppercase text-on-surface-variant shrink-0">

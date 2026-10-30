@@ -135,8 +135,10 @@ export default function BespokeHoloCard({
       <div
         className="relative w-full h-full rounded-2xl transition-transform duration-500 ease-out will-change-transform"
         style={{
-          transformStyle: "preserve-3d",
-          transform: `rotateX(${currentXRot}deg) rotateY(${currentYRot}deg)`,
+          transformStyle: isAndroidView ? "flat" : "preserve-3d",
+          transform: isAndroidView
+            ? (isFlipped ? "rotateY(180deg)" : "rotateY(0deg)")
+            : `rotateX(${currentXRot}deg) rotateY(${currentYRot}deg)`,
         }}
       >
         {/* =========================================================================
@@ -147,7 +149,7 @@ export default function BespokeHoloCard({
           style={{
             backfaceVisibility: "hidden",
             WebkitBackfaceVisibility: "hidden",
-            transform: "rotateY(0deg) translateZ(1px)",
+            transform: isAndroidView ? "rotateY(0deg)" : "rotateY(0deg) translateZ(1px)",
             boxShadow: isHovered
               ? "0 22px 35px -10px rgba(0,0,0,0.18), 0 10px 15px -6px rgba(197, 155, 39, 0.2)"
               : "0 4px 12px rgba(0,0,0,0.06)",
@@ -156,7 +158,7 @@ export default function BespokeHoloCard({
           {/* Photo Container with Depth */}
           <div
             className={`relative w-full ${isAndroidView ? "h-[76%] sm:h-[80%]" : "h-[80%]"} overflow-hidden bg-stone-100`}
-            style={{ transform: "translateZ(8px)" }}
+            style={{ transform: isAndroidView ? "none" : "translateZ(8px)" }}
           >
             <Image
               src={card.image}
@@ -170,7 +172,7 @@ export default function BespokeHoloCard({
             {/* Top Badges with 3D Parallax */}
             <div
               className="absolute top-2 left-2 sm:top-3.5 sm:left-3.5 z-10 flex items-center"
-              style={{ transform: "translateZ(24px)" }}
+              style={{ transform: isAndroidView ? "none" : "translateZ(24px)" }}
             >
               <span className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full bg-white/95 backdrop-blur-md font-mono font-semibold text-[7.5px] sm:text-[11px] uppercase tracking-wider text-charcoal-ink border border-stone-200/80 shadow-xs whitespace-nowrap">
                 {card.badge}
@@ -182,7 +184,7 @@ export default function BespokeHoloCard({
               className="absolute inset-0 pointer-events-none transition-opacity duration-300 mix-blend-color-dodge z-20"
               style={{
                 opacity: isHovered ? (isAndroidView ? 0.25 : 0.65) : 0,
-                background: `linear-gradient(${foilAngle}deg, 
+                backgroundImage: `linear-gradient(${foilAngle}deg, 
                   transparent 18%, 
                   rgba(197, 155, 39, 0.35) 32%, 
                   rgba(255, 235, 170, 0.45) 40%, 
@@ -257,7 +259,7 @@ export default function BespokeHoloCard({
           style={{
             backfaceVisibility: "hidden",
             WebkitBackfaceVisibility: "hidden",
-            transform: "rotateY(180deg) translateZ(1px)",
+            transform: isAndroidView ? "rotateY(180deg)" : "rotateY(180deg) translateZ(1px)",
             boxShadow: isHovered
               ? "0 22px 35px -10px rgba(0,0,0,0.3), 0 10px 15px -6px rgba(197, 155, 39, 0.25)"
               : "0 6px 16px rgba(0,0,0,0.15)",

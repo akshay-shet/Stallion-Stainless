@@ -21,39 +21,107 @@ import {
 import { useLenis } from "@/components/SmoothScroll";
 import BespokeHoloCard from "@/components/BespokeHoloCard";
 import ArchitecturalEmbers from "@/components/ArchitecturalEmbers";
+import ScrollVideoHero from "@/components/ScrollVideoHero";
+
+// ── Update this after running scripts/extract-frames.bat ──────────────────────
+// Set to the total number of frames in public/frames/
+const FRAME_COUNT = 150; // placeholder — update after extraction
 
 interface HomePageClientProps {
   isAndroid?: boolean;
+  initialShowIntro?: boolean;
 }
 
-export default function HomePageClient({ isAndroid = false }: HomePageClientProps) {
+export default function HomePageClient({
+  isAndroid = false,
+  initialShowIntro = true,
+}: HomePageClientProps) {
   const router = useRouter();
   const lenis = useLenis();
   const [isAndroidView, setIsAndroidView] = useState(isAndroid);
 
-  // ── Intro video state ────────────────────────────────────────────────────────
-  const [showIntro, setShowIntro] = useState(() => (isAndroid ? false : true));
+  // ── Intro video state: initialized with SSR prop to ensure 100% hydration match ──
+  const [showIntro, setShowIntro] = useState(initialShowIntro);
   const [fadeOut, setFadeOut] = useState(false);
   const [isIntroLogoPhase, setIsIntroLogoPhase] = useState(false);
   const introVideoRef = useRef<HTMLVideoElement>(null);
+  const heroVideoRef = useRef<HTMLVideoElement>(null);
   const skippedRef = useRef(false);
 
-  // Detect mobile on client
+  // Clear any suppression flags so intro video plays consistently on visits
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.removeItem("stallion_intro_seen");
+        document.cookie = "stallion_intro_seen=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+      } catch {}
+    }
+  }, []);
+
+  // Detect mobile on client immediately
   useEffect(() => {
     if (typeof window !== "undefined") {
       const ua = navigator.userAgent || "";
-      const isMobile = /Android/i.test(ua) || window.innerWidth < 768;
+      const isMobile =
+        isAndroid ||
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua) ||
+        window.innerWidth < 1024;
       if (isMobile) {
         setIsAndroidView(true);
-        setShowIntro(false);
-        document.body.style.overflow = "unset";
       }
     }
   }, [isAndroid]);
 
+  // Autoplay intro video cleanly with muted playback
+  useEffect(() => {
+    if (showIntro && introVideoRef.current) {
+      const vid = introVideoRef.current;
+      vid.muted = true;
+      vid.defaultMuted = true;
+      vid.playsInline = true;
+      vid.setAttribute("muted", "");
+      vid.setAttribute("playsinline", "");
+      vid.setAttribute("webkit-playsinline", "");
+      const playPromise = vid.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(() => {
+          const startOnTouch = () => {
+            if (introVideoRef.current) {
+              introVideoRef.current.muted = true;
+              introVideoRef.current.play().catch(() => {});
+            }
+            window.removeEventListener("touchstart", startOnTouch);
+            window.removeEventListener("click", startOnTouch);
+          };
+          window.addEventListener("touchstart", startOnTouch, { once: true, passive: true });
+          window.addEventListener("click", startOnTouch, { once: true, passive: true });
+        });
+      }
+    }
+  }, [showIntro, isAndroidView]);
+
+  // Preload and manage hero video playback
+  useEffect(() => {
+    if (heroVideoRef.current) {
+      const vid = heroVideoRef.current;
+      vid.muted = true;
+      if (!showIntro) {
+        vid.play().catch(() => {});
+      }
+    }
+  }, [showIntro, isAndroidView]);
+
   const handleSkip = React.useCallback(() => {
     if (skippedRef.current) return;
     skippedRef.current = true;
+
+    // Immediately trigger pre-buffered hero video playback with zero delay
+    if (heroVideoRef.current) {
+      heroVideoRef.current.currentTime = 0;
+      heroVideoRef.current.muted = true;
+      heroVideoRef.current.play().catch(() => {});
+    }
+
     setFadeOut(true);
     if (typeof window !== "undefined") {
       document.body.style.overflow = "unset";
@@ -70,7 +138,7 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
       setShowIntro(false);
       setIsIntroLogoPhase(false);
       lenis?.start();
-    }, 600);
+    }, 500);
   }, [lenis]);
 
   useEffect(() => {
@@ -80,8 +148,7 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
   }, [handleSkip]);
 
   useEffect(() => {
-    if (isAndroid) {
-      setShowIntro(false);
+    if (!showIntro) {
       document.body.style.overflow = "unset";
       document.documentElement.style.overflow = "unset";
       document.documentElement.classList.remove("intro-active");
@@ -105,23 +172,13 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
       document.documentElement.classList.remove("intro-active");
       lenis?.start();
     };
-  }, [showIntro, fadeOut, isAndroid, lenis]);
+  }, [showIntro, fadeOut, lenis]);
 
   useEffect(() => {
-    if (isAndroid || !showIntro) return;
-    const vid = introVideoRef.current;
-    if (vid) {
-      vid.muted = true;
-      vid.defaultMuted = true;
-      vid.playsInline = true;
-      const p = vid.play();
-      if (p !== undefined) {
-        p.catch(() => { if (vid) { vid.muted = true; vid.play().catch(() => {}); } });
-      }
-    }
+    if (!showIntro) return;
     const timer = setTimeout(() => { handleSkip(); }, 10800);
     return () => clearTimeout(timer);
-  }, [showIntro, handleSkip, isAndroid]);
+  }, [showIntro, handleSkip]);
 
   const playHeroVideo = !showIntro;
 
@@ -137,10 +194,7 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
   const proProducts = Array.from(
     new Map(
       productList
-        .filter((p) =>
-          ["aston", "mesa", "belair", "capri", "baron", "bruno", "cairo", "bond"].includes(p.id) ||
-          (p.id.startsWith("custom-") && (p as any).isPro)
-        )
+        .filter((p) => p.isPro)
         .map((p) => [p.id, p])
     ).values()
   );
@@ -148,10 +202,7 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
   const bestSellingProducts = Array.from(
     new Map(
       productList
-        .filter((p) =>
-          ["aris", "aura", "chester", "atlas", "brio", "bliss", "belair", "aston"].includes(p.id) ||
-          (p.id.startsWith("custom-") && (p as any).isBestSelling)
-        )
+        .filter((p) => p.isBestSelling && !p.isPro)
         .map((p) => [p.id, p])
     ).values()
   );
@@ -210,13 +261,13 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
     },
     {
       id: "coffee",
-      title: "Coffee & Accent Tables",
+      title: "Corner Tables & Teapoys",
       subtitle: "12mm Toughened Fluted Glass • Titanium PVD",
       image: "/lineups/architectural_coffee_table.jpg",
       badge: "Geometric Glass & Metal",
-      description: "Fluted tempered glass and brushed titanium coffee tables anchoring living spaces with architectural weight and visual clarity.",
+      description: "Fluted tempered glass and brushed titanium corner tables and teapoys anchoring living spaces with architectural weight and visual clarity.",
       bullets: ["12mm Toughened Fluted Glass","Dual-Tier Architectural Storage","Anti-Corrosion Vacuum Plating","Mirror-Polished Stainless Steel Legs","Shatterproof Safety Lamination","Water-Ring & Thermal Shock Proof","Concealed Silicone Shock Mounts","Geometric Nesting Configurations"],
-      href: "/collections?category=coffee-corner-table"
+      href: "/collections?category=corner-table"
     },
     {
       id: "themed",
@@ -232,13 +283,13 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
 
   const lineups = [
     { name: "Sofa", href: "/collections?category=sofa", image: "/lineups/sofa.jpg", subtitle: "Modular Sectionals & Deep Living" },
-    { name: "Accent & Recliner", href: "/collections?category=accent-recliner", image: "/lineups/accent_recliner.png", subtitle: "Sculptural Armchairs & Lounges" },
-    { name: "Coffee & Corner Table", href: "/collections?category=coffee-corner-table", image: "/lineups/architectural_coffee_table.jpg", subtitle: "Geometric Glass & Stainless Craft" },
+    { name: "Corner Tables", href: "/collections?category=corner-table", image: "/lineups/corner_table.jpg", subtitle: "Geometric PVD Steel Accents" },
+    { name: "Teapoy", href: "/collections?category=teapoy", image: "/lineups/teapoy.jpg", subtitle: "Centerpiece Coffee & Low Tables" },
     { name: "Dining Table", href: "/collections?category=dining-table", image: "/lineups/architectural_dining_table.jpg", subtitle: "Italian Marble & PVD Stainless" },
     { name: "Partition & Console", href: "/collections?category=partition-console", image: "/lineups/architectural_partition_console.jpg", subtitle: "Spatial Screens & Entryway Consoles" },
     { name: "Chairs", href: "/collections?category=chairs", image: "/lineups/architectural_lounge_chairs.jpg", subtitle: "Stainless Steel Pillars & Velvet" },
     { name: "Themed", href: "/collections?category=themed", image: "/lineups/architectural_merchandising.jpg", subtitle: "Bespoke Architectural Concepts" },
-    { name: "Merchandising", href: "/collections?category=merchandising", image: "/lineups/architectural_themed_credenza.jpg", subtitle: "Signature Curated Series" }
+    { name: "Merchandising", href: "/collections?category=merchandising", image: "/lineups/architectural_themed_credenza.jpg", subtitle: "Signature Architectural Lineups" }
   ];
 
   const articles = [
@@ -316,11 +367,11 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
   return (
     <div className="flex flex-col min-h-screen bg-[#FDFCFB] text-[#111111] relative overflow-x-hidden w-full max-w-full">
 
-      {/* ── Intro Video Overlay ─────────────────────────────────────────────── */}
-      {!isAndroid && showIntro && (
+      {/* ── Intro Video Overlay (Android: /intro-android.mp4, Desktop: /intro.mp4) ─────────────────────────────────────────────── */}
+      {showIntro && (
         <div
           id="stallion-intro-screen"
-          className={`stallion-intro-container stallion-intro-anim fixed inset-0 z-[9999] bg-[#f1f3f3] flex items-center justify-center transition-opacity duration-700 select-none overflow-hidden w-screen h-screen ${
+          className={`stallion-intro-container stallion-intro-anim fixed inset-0 z-[9999] bg-[#f1f3f3] flex items-center justify-center transition-opacity duration-700 select-none overflow-hidden w-full h-full h-[100dvh] ${
             fadeOut ? "opacity-0 pointer-events-none stallion-dismissed" : "opacity-100 pointer-events-auto"
           }`}
         >
@@ -328,153 +379,248 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
             <div className="w-8 h-8 border-2 border-stone-300 border-t-stone-600 animate-spin rounded-full" />
             <span className="font-sans text-xs tracking-wider uppercase text-stone-500">Loading Stallion Intro...</span>
           </div>
-          <div className={`relative w-full h-full max-w-full max-h-full flex items-center justify-center z-10 pointer-events-none transition-all duration-700 ${isIntroLogoPhase ? "p-2 sm:p-4" : "p-0"}`}>
+          <div className={`relative w-full h-full max-w-full max-h-full flex items-center justify-center z-10 pointer-events-none transition-all duration-700 ${!isAndroidView && isIntroLogoPhase ? "p-2 sm:p-4" : "p-0"}`}>
             <video
               id="stallion-intro-video"
+              key={isAndroidView ? "intro-vid-android" : "intro-vid-desktop"}
               ref={introVideoRef}
-              src="/intro.mp4"
-              autoPlay muted playsInline preload="auto"
-              disablePictureInPicture disableRemotePlayback
+              src={isAndroidView ? "/intro-android.mp4" : "/intro.mp4"}
+              autoPlay
+              muted
+              playsInline
+              preload="auto"
+              disablePictureInPicture
+              disableRemotePlayback
               controlsList="nodownload noplaybackrate nofullscreen noremoteplayback"
+              onLoadedMetadata={(e) => {
+                const vid = e.currentTarget;
+                vid.muted = true;
+                vid.play().catch(() => {});
+              }}
+              onCanPlay={(e) => {
+                const vid = e.currentTarget;
+                vid.muted = true;
+                vid.play().catch(() => {});
+              }}
               onTimeUpdate={(e) => {
                 const vid = e.currentTarget;
-                if (vid.currentTime >= 6.1) { if (!isIntroLogoPhase) setIsIntroLogoPhase(true); }
-                else { if (isIntroLogoPhase) setIsIntroLogoPhase(false); }
+                const logoThreshold = isAndroidView ? 5.8 : 6.1;
+                if (vid.currentTime >= logoThreshold) {
+                  if (!isIntroLogoPhase) setIsIntroLogoPhase(true);
+                } else {
+                  if (isIntroLogoPhase) setIsIntroLogoPhase(false);
+                }
               }}
               onEnded={handleSkip}
-              className={`w-full h-full max-w-full max-h-full pointer-events-auto transition-all duration-500 ${isIntroLogoPhase ? "object-contain" : "object-cover"}`}
+              className={`w-full h-full max-w-full max-h-full pointer-events-auto transition-all duration-500 ${
+                isAndroidView
+                  ? "object-cover"
+                  : isIntroLogoPhase
+                  ? "object-contain"
+                  : "object-cover"
+              }`}
             />
           </div>
-          <div id="stallion-touch-shield" onClick={handleSkip} className="absolute inset-0 z-20 w-full h-full cursor-pointer bg-transparent" />
+
+          {/* Full-screen touch shield: any touch or click anywhere immediately activates skip */}
+          <div
+            id="stallion-touch-shield"
+            onClick={handleSkip}
+            onTouchStart={handleSkip}
+            className="absolute inset-0 z-20 w-full h-full cursor-pointer bg-transparent"
+          />
         </div>
       )}
 
-      <Header />
+      {/* Top navigation bar: fades in smoothly as intro dismisses, hidden during intro */}
+      <div className={`transition-opacity duration-500 relative z-50 ${showIntro && !fadeOut ? "opacity-0 pointer-events-none" : "opacity-100"}`}>
+        <Header />
+      </div>
 
-      <main className="flex-grow relative z-10 w-full min-w-0 overflow-x-hidden">
+      <main className="flex-grow relative z-10 w-full min-w-0 overflow-x-clip">
 
         {/* ══════════════════════════════════════════════════════════════════════
-            HERO — Full-bleed cinematic video (Kage: full viewport presence)
+            HERO — Continuous Smooth Video Playback (Full Bleed Cinematic)
+            Desktop Source: public/hero-desktop.mp4 (Pre-buffered in background)
+            Android Source: public/hero-android.mp4 (Pre-buffered in background)
         ══════════════════════════════════════════════════════════════════════ */}
         <section
           className={`relative w-full ${
-            isAndroidView ? "h-auto aspect-video" : "h-screen min-h-[600px]"
-          } bg-stone-950 flex items-center justify-center overflow-hidden`}
+            isAndroidView
+              ? "h-auto bg-stone-950 block overflow-hidden"
+              : "h-screen min-h-[650px] bg-stone-950 flex items-center justify-center overflow-hidden"
+          }`}
         >
-          {/* Video layer */}
-          <div className={isAndroidView ? "relative w-full h-auto aspect-video" : "absolute inset-0"}>
-            {playHeroVideo && (
-              <>
-                <video
-                  src="/hero_video.mp4"
-                  autoPlay muted playsInline loop
-                  disablePictureInPicture disableRemotePlayback
-                  controlsList="nodownload noplaybackrate nofullscreen noremoteplayback"
-                  className={`w-full ${
-                    isAndroidView
-                      ? "h-auto aspect-video block object-contain"
-                      : "h-full object-cover absolute inset-0"
-                  } pointer-events-none`}
-                />
-                <div className="absolute inset-0 z-10 pointer-events-auto" />
-              </>
-            )}
+          {/* Video layer: fixed width (w-full), natural non-fixed height (h-auto aspect-[9/16]) on Android */}
+          <div className={isAndroidView ? "relative w-full h-auto aspect-[9/16]" : "absolute inset-0 w-full h-full"}>
+            <video
+              ref={heroVideoRef}
+              src={isAndroidView ? "/hero-android.mp4" : "/hero-desktop.mp4"}
+              preload="auto"
+              muted
+              playsInline
+              loop={false}
+              poster={isAndroidView ? "/android_hero_first_frame.png" : undefined}
+              disablePictureInPicture
+              disableRemotePlayback
+              controlsList="nodownload noplaybackrate nofullscreen noremoteplayback"
+              onLoadedMetadata={(e) => {
+                const vid = e.currentTarget;
+                vid.muted = true;
+                if (!showIntro) {
+                  vid.play().catch(() => {});
+                }
+              }}
+              onTimeUpdate={(e) => {
+                const vid = e.currentTarget;
+                // Freeze precisely on the last frame before reaching physical EOF to prevent looping or black flash
+                if (vid.duration && vid.currentTime >= vid.duration - 0.08) {
+                  vid.pause();
+                  vid.currentTime = Math.max(0, vid.duration - 0.04);
+                }
+              }}
+              onEnded={(e) => {
+                const vid = e.currentTarget;
+                // Permanently hold on the final frame when video finishes
+                if (vid.duration) {
+                  vid.pause();
+                  vid.currentTime = Math.max(0, vid.duration - 0.04);
+                }
+              }}
+              className={`w-full ${
+                isAndroidView
+                  ? "h-auto aspect-[9/16] block object-cover"
+                  : "h-full object-cover absolute inset-0"
+              } pointer-events-none`}
+            />
+            <div className="absolute inset-0 z-10 pointer-events-auto" />
           </div>
 
-          {/* Cinematic overlays — no text, pure architectural UI decoration */}
-          {!isAndroidView && (
-            <>
-              {/* Radial vignette — dark edges, clear centre */}
-              <div
-                className="absolute inset-0 z-20 pointer-events-none"
-                style={{
-                  background:
-                    "radial-gradient(ellipse 80% 80% at 50% 50%, transparent 40%, rgba(17,17,17,0.55) 100%)",
-                }}
-              />
+            {/* Bottom gold accent rule (visible on both Desktop & Android for luxury finish) */}
+            <div className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
+              <div className="h-[3px] bg-gradient-to-r from-transparent via-[#C59B27] to-transparent opacity-80" />
+            </div>
 
-              {/* Top-left corner bracket */}
-              <div className="absolute top-8 left-8 z-30 pointer-events-none hidden lg:block">
-                <div className="w-10 h-10 border-t-2 border-l-2 border-[#C59B27]/70" />
-              </div>
-              {/* Top-right corner bracket */}
-              <div className="absolute top-8 right-8 z-30 pointer-events-none hidden lg:block">
-                <div className="w-10 h-10 border-t-2 border-r-2 border-[#C59B27]/70" />
-              </div>
-              {/* Bottom-left corner bracket */}
-              <div className="absolute bottom-8 left-8 z-30 pointer-events-none hidden lg:block">
-                <div className="w-10 h-10 border-b-2 border-l-2 border-[#C59B27]/70" />
-              </div>
-              {/* Bottom-right corner bracket */}
-              <div className="absolute bottom-8 right-8 z-30 pointer-events-none hidden lg:block">
-                <div className="w-10 h-10 border-b-2 border-r-2 border-[#C59B27]/70" />
-              </div>
+            {/* Cinematic architectural overlays */}
+            {!isAndroidView && (
+              <>
+                {/* Radial vignette */}
+                <div
+                  className="absolute inset-0 z-20 pointer-events-none"
+                  style={{
+                    background:
+                      "radial-gradient(ellipse 80% 80% at 50% 50%, transparent 40%, rgba(17,17,17,0.5) 100%)",
+                  }}
+                />
 
-              {/* Centred crosshair reticle */}
-              <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none hidden lg:flex">
-                <div className="relative w-16 h-16">
-                  {/* Horizontal arm */}
-                  <div className="absolute top-1/2 left-0 right-0 h-px bg-white/20 -translate-y-1/2" />
-                  {/* Vertical arm */}
-                  <div className="absolute left-1/2 top-0 bottom-0 w-px bg-white/20 -translate-x-1/2" />
-                  {/* Centre dot — pulsing gold */}
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-2 h-2 rounded-full bg-[#C59B27] animate-ping opacity-70" />
-                    <div className="absolute w-1.5 h-1.5 rounded-full bg-[#C59B27]" />
-                  </div>
+                {/* Corner bracket reticles */}
+                <div className="absolute top-8 left-8 z-30 pointer-events-none hidden lg:block">
+                  <div className="w-10 h-10 border-t-2 border-l-2 border-[#C59B27]/70" />
                 </div>
-              </div>
+                <div className="absolute top-8 right-8 z-30 pointer-events-none hidden lg:block">
+                  <div className="w-10 h-10 border-t-2 border-r-2 border-[#C59B27]/70" />
+                </div>
+                <div className="absolute bottom-8 left-8 z-30 pointer-events-none hidden lg:block">
+                  <div className="w-10 h-10 border-b-2 border-l-2 border-[#C59B27]/70" />
+                </div>
+                <div className="absolute bottom-8 right-8 z-30 pointer-events-none hidden lg:block">
+                  <div className="w-10 h-10 border-b-2 border-r-2 border-[#C59B27]/70" />
+                </div>
 
-              {/* Bottom gold rule — full width accent line */}
-              <div className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
-                <div className="h-[3px] bg-gradient-to-r from-transparent via-[#C59B27] to-transparent opacity-80" />
-              </div>
-
-              {/* Left edge vertical tick marks — architectural detail */}
-              <div className="absolute left-8 top-1/2 -translate-y-1/2 z-30 pointer-events-none hidden lg:flex flex-col gap-2">
-                {[...Array(5)].map((_, i) => (
-                  <div
-                    key={i}
-                    className="bg-white/30"
-                    style={{ width: i === 2 ? "20px" : "10px", height: "1px" }}
-                  />
-                ))}
-              </div>
-              {/* Right edge vertical tick marks */}
-              <div className="absolute right-8 top-1/2 -translate-y-1/2 z-30 pointer-events-none hidden lg:flex flex-col gap-2 items-end">
-                {[...Array(5)].map((_, i) => (
-                  <div
-                    key={i}
-                    className="bg-white/30"
-                    style={{ width: i === 2 ? "20px" : "10px", height: "1px" }}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-        </section>
+                {/* Architectural tick marks */}
+                <div className="absolute left-8 top-1/2 -translate-y-1/2 z-30 pointer-events-none hidden lg:flex flex-col gap-2">
+                  {[...Array(5)].map((_, i) => (
+                    <div
+                      key={i}
+                      className="bg-white/30"
+                      style={{ width: i === 2 ? "20px" : "10px", height: "1px" }}
+                    />
+                  ))}
+                </div>
+                <div className="absolute right-8 top-1/2 -translate-y-1/2 z-30 pointer-events-none hidden lg:flex flex-col gap-2 items-end">
+                  {[...Array(5)].map((_, i) => (
+                    <div
+                      key={i}
+                      className="bg-white/30"
+                      style={{ width: i === 2 ? "20px" : "10px", height: "1px" }}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </section>
 
         {/* ══════════════════════════════════════════════════════════════════════
-            MANIFESTO STRIP — Kage-style full-width text ribbon
+            PROMOTIONAL TICKER RIBBON — Highlighted Luxury Gold Banner
         ══════════════════════════════════════════════════════════════════════ */}
-        {!isAndroidView && (
-          <section className="w-full bg-[#111111] py-5 overflow-hidden border-y border-[#C59B27]/20">
-            <div className="flex gap-16 items-center whitespace-nowrap animate-[marqueeScroll_30s_linear_infinite]" style={{ width: "max-content" }}>
-              {["Precision Fabrication", "304 Surgical Steel", "PVD Titanium Finish", "Italian Marble", "Bespoke Commissioned", "Hand-Polished Joints", "Lifetime Guarantee", "Architectural Grade", "Precision Fabrication", "304 Surgical Steel", "PVD Titanium Finish", "Italian Marble", "Bespoke Commissioned", "Hand-Polished Joints", "Lifetime Guarantee", "Architectural Grade"].map((item, i) => (
-                <span key={i} className="inline-flex items-center gap-8 font-mono text-[11px] uppercase tracking-[0.2em] text-white/50">
-                  {item}
-                  <span className="text-[#C59B27] text-base">◆</span>
+        <section className="relative z-30 w-full overflow-hidden bg-gradient-to-r from-[#0c0c0d] via-[#1a1710] to-[#0c0c0d] py-4 sm:py-5 border-y-2 border-[#C59B27]/70 shadow-[0_10px_35px_rgba(197,155,39,0.18)]">
+          {/* Subtle gold ambient glow in center */}
+          <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_50%_50%,rgba(197,155,39,0.12),transparent_70%)]" />
+
+          <div
+            className="flex gap-14 sm:gap-20 items-center whitespace-nowrap animate-[marqueeScroll_32s_linear_infinite]"
+            style={{ width: "max-content" }}
+          >
+            {[
+              "OFFER",
+              "SUITE",
+              "WARRANTY",
+              "OFFER",
+              "SUITE",
+              "WARRANTY",
+            ].map((type, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center gap-6 sm:gap-8 select-none"
+              >
+                {type === "OFFER" && (
+                  <span className="inline-flex items-center gap-3 bg-gradient-to-r from-[#C59B27]/20 via-[#C59B27]/10 to-transparent border border-[#C59B27]/60 rounded-full px-5 py-1.5 shadow-[0_0_20px_rgba(197,155,39,0.25)]">
+                    <span className="w-2 h-2 rounded-full bg-[#C59B27] animate-pulse shadow-[0_0_8px_#C59B27]" />
+                    <span className="font-mono text-[11px] sm:text-xs font-bold uppercase tracking-[0.25em] text-white">
+                      EXCLUSIVE PRIVILEGE:
+                    </span>
+                    <span className="font-display font-black text-xs sm:text-sm tracking-wider uppercase text-[#F9E29B] bg-gradient-to-r from-[#C59B27] to-[#e8c84a] bg-clip-text text-transparent drop-shadow-[0_2px_10px_rgba(197,155,39,0.4)]">
+                      UP TO 25% OFF
+                    </span>
+                    <span className="font-mono text-[11px] sm:text-xs font-medium uppercase tracking-[0.22em] text-white/80">
+                      ON DIRECT PLATFORM BOOKINGS
+                    </span>
+                  </span>
+                )}
+
+                {type === "SUITE" && (
+                  <span className="inline-flex items-center gap-3">
+                    <span className="font-mono text-[11px] sm:text-xs font-semibold tracking-[0.26em] uppercase text-white/90">
+                      LIMITED TIME ARCHITECTURAL SUITE OFFERS
+                    </span>
+                    <span className="text-[10px] uppercase font-mono tracking-widest text-[#C59B27] bg-[#C59B27]/15 border border-[#C59B27]/40 px-2 py-0.5 rounded">
+                      2026 EDITION
+                    </span>
+                  </span>
+                )}
+
+                {type === "WARRANTY" && (
+                  <span className="inline-flex items-center gap-3">
+                    <span className="font-mono text-[11px] sm:text-xs font-medium tracking-[0.24em] uppercase text-stone-300">
+                      SURGICAL 304 STAINLESS STEEL · LIFETIME STRUCTURAL WARRANTY
+                    </span>
+                  </span>
+                )}
+
+                {/* Sparkling Gold Star Separator */}
+                <span className="text-[#C59B27] text-base sm:text-lg drop-shadow-[0_0_8px_rgba(197,155,39,0.8)]">
+                  ✦
                 </span>
-              ))}
-            </div>
-          </section>
-        )}
+              </span>
+            ))}
+          </div>
+        </section>
 
         {/* ══════════════════════════════════════════════════════════════════════
             SECTION 1 — About Stallion (Kage: bold editorial split)
         ══════════════════════════════════════════════════════════════════════ */}
         <section
-          className={`w-full bg-[#f0f0f0] border-b border-[#d7d8d2] ${
+          className={`relative z-30 w-full bg-[#f0f0f0] border-b border-[#d7d8d2] ${
             isAndroidView ? "py-8 px-4" : "py-20 sm:py-28 px-6 sm:px-12 lg:px-20"
           } relative overflow-hidden`}
         >
@@ -488,7 +634,6 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
               /* ── Android layout ── */
               <div className="flex flex-col gap-5">
                 <div>
-                  <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#C59B27]">Our Philosophy</span>
                   <h2 className="font-display text-2xl font-bold text-[#111111] tracking-tight mt-1 leading-tight">
                     Authentic, Quality &amp; Luxury Interior Furniture
                   </h2>
@@ -515,10 +660,6 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
               <div className="grid grid-cols-12 gap-10 lg:gap-16 items-center">
                 {/* Left: massive typographic number + label — Kage editorial */}
                 <div className="col-span-5 flex flex-col">
-                  <span className="font-mono text-[11px] uppercase tracking-[0.25em] text-[#C59B27] flex items-center gap-2 mb-6">
-                    <span className="inline-block w-8 h-px bg-[#C59B27]" />
-                    Our Philosophy
-                  </span>
                   <h2 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-[#111111] tracking-tight leading-tight mb-6">
                     Authentic,<br />Quality &amp; Luxury<br />Interior Furniture
                   </h2>
@@ -572,27 +713,11 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
           <div className="max-w-[1600px] mx-auto relative z-10">
             {/* Section header — Kage oversized label style */}
             <div className={`${isAndroidView ? "mb-6" : "mb-14 sm:mb-20"}`}>
-              {!isAndroidView && (
-                <span className="font-mono text-[10px] sm:text-xs uppercase tracking-[0.25em] text-[#5e606c] flex items-center gap-2 mb-4">
-                  <span className="inline-block w-8 h-px bg-[#5e606c]" />
-                  Collection Index
-                </span>
-              )}
               <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
                 <h2 className={`font-display ${isAndroidView ? "text-2xl" : "text-3xl sm:text-4xl lg:text-6xl"} font-bold text-[#2d394b] tracking-tight uppercase leading-none`}>
                   Bespoke Architectural<br className="hidden sm:block" /> Collections
                 </h2>
-                {!isAndroidView && (
-                  <p className="font-sans text-xs text-stone-700 max-w-xs leading-relaxed text-right hidden sm:block">
-                    Hover or click any collection card to inspect architectural details &amp; materials.
-                  </p>
-                )}
               </div>
-              {isAndroidView && (
-                <p className="font-sans text-[10px] text-stone-700 mt-1.5">
-                  Tap any card to flip and view specifications.
-                </p>
-              )}
               {/* Kage-style horizontal rule */}
               <div className="mt-6 h-px bg-gradient-to-r from-[#2d394b]/40 via-[#C59B27]/50 to-transparent" />
             </div>
@@ -624,12 +749,6 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
           <div className="max-w-[1680px] mx-auto">
             {/* Section header */}
             <div className={`${isAndroidView ? "mb-5" : "mb-12 sm:mb-16"}`}>
-              {!isAndroidView && (
-                <span className="font-mono text-xs uppercase tracking-[0.25em] text-[#C59B27] flex items-center gap-2 mb-4">
-                  <span className="inline-block w-8 h-px bg-[#C59B27]" />
-                  Lineup Index
-                </span>
-              )}
               <h2 className={`font-display ${isAndroidView ? "text-2xl" : "text-3xl sm:text-4xl lg:text-5xl"} font-bold text-[#111111] uppercase tracking-tight`}>
                 Our Architectural Lineups
               </h2>
@@ -692,9 +811,6 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
             <div id="pro-collection" className={`${isAndroidView ? "pt-4 pb-6" : "pt-6 pb-14"} border-t border-stone-200/80`}>
               <div className={`flex items-center justify-between ${isAndroidView ? "mb-3" : "mb-6 sm:mb-8"}`}>
                 <div className="flex flex-col gap-0.5">
-                  {!isAndroidView && (
-                    <span className="font-mono text-[9px] uppercase tracking-[0.22em] text-[#C59B27]">Curated Series</span>
-                  )}
                   <Link href="/pro-collection" className="group inline-block">
                     <h3 className={`font-display ${isAndroidView ? "text-lg" : "text-2xl sm:text-3xl"} font-bold text-[#111111] uppercase tracking-widest group-hover:text-[#5e606c] transition-colors`}>
                       Premier Grade
@@ -772,9 +888,6 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
             <div id="best-selling" className={`${isAndroidView ? "pt-5" : "pt-8 sm:pt-10"} border-t border-stone-200/80`}>
               <div className={`flex items-center justify-between ${isAndroidView ? "mb-3" : "mb-6 sm:mb-8"}`}>
                 <div className="flex flex-col gap-0.5">
-                  {!isAndroidView && (
-                    <span className="font-mono text-[9px] uppercase tracking-[0.22em] text-[#C59B27]">Top Performers</span>
-                  )}
                   <Link href="/best-selling" className="group inline-block">
                     <h3 className={`font-display ${isAndroidView ? "text-lg" : "text-2xl sm:text-3xl"} font-bold text-[#111111] uppercase tracking-widest group-hover:text-[#5e606c] transition-colors`}>
                       Best Selling
@@ -867,10 +980,6 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
             <div className="absolute inset-0 bg-gradient-to-r from-[#FDFCFB]/88 via-[#FDFCFB]/50 to-transparent" />
             <div className="absolute inset-0 flex items-center px-12 lg:px-20">
               <div className="max-w-xl">
-                <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-[#C59B27] flex items-center gap-2 mb-5">
-                  <span className="inline-block w-8 h-px bg-[#C59B27]" />
-                  The Stallion Standard
-                </span>
                 <h2 className="font-display text-4xl lg:text-5xl font-bold text-[#111111] leading-tight tracking-tight mb-5">
                   Crafted to<br />Outlast Generations
                 </h2>
@@ -890,18 +999,14 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
         )}
 
         {/* ══════════════════════════════════════════════════════════════════════
-            SECTION 5 — News & Craft Journal (hidden on Android)
+            SECTION 5 — News & Insights (hidden on Android)
         ══════════════════════════════════════════════════════════════════════ */}
         {!isAndroidView && (
           <section className="w-full bg-[#e8e8e3] py-20 sm:py-24 px-6 sm:px-12 lg:px-20 border-b border-[#d2d2cc]">
             <div className="max-w-[1600px] mx-auto">
               <div className="mb-12 sm:mb-16">
-                <span className="font-mono text-xs uppercase tracking-[0.25em] text-[#5e606c] flex items-center gap-2 mb-4">
-                  <span className="inline-block w-8 h-px bg-[#5e606c]" />
-                  Craft Journal
-                </span>
                 <h2 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-[#111111] uppercase tracking-tight">
-                  News &amp; Craft Journal
+                  News &amp; Insights
                 </h2>
                 <div className="mt-4 h-px bg-gradient-to-r from-[#111111]/30 via-[#C59B27]/40 to-transparent" />
               </div>
@@ -937,12 +1042,6 @@ export default function HomePageClient({ isAndroid = false }: HomePageClientProp
         ══════════════════════════════════════════════════════════════════════ */}
         <section className={`w-full bg-[#393f44] text-white ${isAndroidView ? "pt-5 sm:pt-8" : "pt-12 sm:pt-16"} pb-0 overflow-hidden`}>
           <div className={`max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-20 ${isAndroidView ? "mb-4" : "mb-8"}`}>
-            {!isAndroidView && (
-              <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-[#C59B27] flex items-center gap-2 mb-4">
-                <span className="inline-block w-8 h-px bg-[#C59B27]" />
-                Spatial Gallery
-              </span>
-            )}
             <div className="flex items-end justify-between">
               <h3 className={`font-display ${isAndroidView ? "text-base sm:text-xl" : "text-2xl sm:text-3xl"} font-bold uppercase tracking-wider text-white`}>
                 Architectural Living Spaces

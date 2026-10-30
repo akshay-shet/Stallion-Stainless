@@ -3,13 +3,15 @@
 import React, { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import Sidebar from "@/components/Sidebar";
 import { PRODUCTS, getMergedProducts, Product } from "@/data/products";
-import { ChevronRight, Menu, SlidersHorizontal, Search, X } from "lucide-react";
+import { ChevronRight, Menu, SlidersHorizontal, Search, X, ArrowLeft } from "lucide-react";
 
 export default function BestSellingPage() {
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [sortBy, setSortBy] = useState<string>("Featured");
@@ -21,7 +23,7 @@ export default function BestSellingPage() {
 
   // Only get Best Selling models
   const bestSellingProducts = useMemo(() => {
-    let result = productList.filter((p) => ["aura", "chester", "aris"].includes(p.id) || (p.id.startsWith("custom-") && (p as any).isBestSelling));
+    let result = productList.filter((p) => p.isBestSelling || p.id === "aris");
 
     if (searchQuery.trim() !== "") {
       const q = searchQuery.toLowerCase();
@@ -83,16 +85,36 @@ export default function BestSellingPage() {
         {/* Right Content Area */}
         <div className="flex-1 flex flex-col min-w-0">
           <main className="flex-grow px-2 sm:px-6 md:pl-12 md:pr-20 py-3 sm:py-12 min-w-0 w-full max-w-container-max mx-auto pt-[72px] sm:pt-[88px]">
-          {/* Breadcrumbs, Menu Toggle & Search Bar in One Line on Mobile */}
-          <div className="flex items-center gap-1.5 sm:gap-4 mb-3 sm:mb-8 w-full">
+          {/* Breadcrumbs, Back Button, Menu Toggle & Search Bar */}
+          <div className="flex items-center gap-2 sm:gap-4 mb-3 sm:mb-8 w-full">
+            {/* Back Button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== "undefined" && window.history.length > 1) {
+                  router.back();
+                } else {
+                  router.push("/");
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-sm border border-stone-300 bg-white hover:bg-stone-100 hover:border-charcoal-ink text-charcoal-ink text-[11px] sm:text-xs font-sans font-semibold tracking-wider uppercase transition-all shadow-2xs group cursor-pointer shrink-0"
+              title="Go Back"
+              aria-label="Go Back"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
+              <span>Back</span>
+            </button>
+
             {/* Menu Toggle for Mobile Filter Drawer */}
             <button
-              className="lg:hidden flex items-center justify-center p-1.5 sm:p-2 rounded-md hover:bg-stone-200 transition-colors text-charcoal-ink shrink-0"
+              className="lg:hidden flex items-center justify-center p-1.5 sm:p-2 rounded-md hover:bg-stone-200 transition-colors text-charcoal-ink shrink-0 cursor-pointer"
               onClick={() => setSidebarOpen(!sidebarOpen)}
               aria-label="Toggle navigation"
             >
               <Menu className="h-4 w-4 sm:h-5 sm:w-5" />
             </button>
+
+            <div className="hidden lg:block h-4 w-[1px] bg-stone-300 shrink-0" />
 
             {/* Breadcrumb Path (Desktop Only) */}
             <nav aria-label="Breadcrumb" className="hidden lg:flex items-center text-[10px] sm:text-xs font-semibold tracking-wider uppercase text-on-surface-variant shrink-0">
